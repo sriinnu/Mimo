@@ -29,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - NSApplicationDelegate
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if enforceSingleInstance() { return }
+
         setupStatusItem()
         setupPopover()
         observeActiveProfile()
@@ -114,5 +116,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if canImport(Sparkle)
         updaterController?.checkForUpdates(sender)
         #endif
+    }
+
+    // MARK: - Single instance
+
+    /// If another Mimo is already running, bring it forward and quit ourselves.
+    /// Returns true when the calling launch should bail before setting up state.
+    /// Without this guard, `open -n Mimo.app` or a stale orphan would let two
+    /// instances fight over the status item + UserDefaults profiles file.
+    private func enforceSingleInstance() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != myPID }
+        guard let existing = others.first else { return false }
+
+        existing.activate(options: [.activateAllWindows])
+        NSApp.terminate(nil)
+        return true
     }
 }
