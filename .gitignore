@@ -36,7 +36,6 @@ release/*.dmg
 .gemini
 .claude
 Examples
-scripts
 
 # Local config (signing settings)
 Configs/Local.xcconfig
