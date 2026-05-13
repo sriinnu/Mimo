@@ -39,7 +39,7 @@ extension View {
 struct MimoPillButton: View {
     var title: String
     var icon: String?
-    var emotion: MimoEmotion? = nil
+    var palette: MimoPaintPalette? = nil
     var prominent: Bool = false
     var action: () -> Void
 
@@ -77,10 +77,10 @@ struct MimoPillButton: View {
 
     private var background: Color {
         if prominent {
-            return emotion?.body ?? MimoPalette.marigold
+            return palette?.body ?? MimoPalette.marigold
         }
-        if let emotion {
-            return emotion.wash
+        if let palette {
+            return palette.wash
         }
         return MimoPalette.surfaceSunken
     }
@@ -100,7 +100,7 @@ struct MimoPillButton: View {
 
 struct MimoBadge: View {
     var text: String
-    var emotion: MimoEmotion = .joy
+    var palette: MimoPaintPalette = MimoEmotion.joy.palette
     var icon: String? = nil
 
     var body: some View {
@@ -113,14 +113,14 @@ struct MimoBadge: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
-        .foregroundStyle(emotion.body)
+        .foregroundStyle(palette.body)
         .background(
             Capsule(style: .continuous)
-                .fill(emotion.wash)
+                .fill(palette.wash)
         )
         .overlay(
             Capsule(style: .continuous)
-                .strokeBorder(emotion.body.opacity(0.4), lineWidth: 0.5)
+                .strokeBorder(palette.body.opacity(0.4), lineWidth: 0.5)
         )
     }
 }

@@ -12,7 +12,7 @@ struct DirectoryProfileListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
-                MimoMascot(mood: .idle, emotion: .disgust, size: 36, animateAmbient: false)
+                MimoMascot(mood: .idle, palette: MimoEmotion.disgust.palette, size: 36, animateAmbient: false)
                     .frame(width: 48, height: 52)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -64,7 +64,7 @@ struct DirectoryProfileListView: View {
     @ViewBuilder
     private var emptyState: some View {
         VStack(spacing: 10) {
-            MimoMascot(mood: .curious, emotion: .disgust, size: 80)
+            MimoMascot(mood: .curious, palette: MimoEmotion.disgust.palette, size: 80)
                 .frame(height: 96)
             Text("No directory mappings yet")
                 .font(MimoFont.headline(13))
@@ -81,12 +81,12 @@ struct DirectoryProfileListView: View {
     @ViewBuilder
     private func directoryRow(mapping: DirectoryProfile) -> some View {
         let profile = appModel.availableProfiles.first { $0.id == mapping.profileID }
-        let emotion: MimoEmotion = profile.map { MimoPalette.emotion(for: $0.id) } ?? .disgust
+        let palette: MimoPaintPalette = profile?.colorID.palette ?? MimoEmotion.disgust.palette
 
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(emotion.body)
+                    .fill(palette.body)
                     .frame(width: 32, height: 32)
                 Image(systemName: Constants.SystemImage.folder)
                     .font(.system(size: 13, weight: .semibold))

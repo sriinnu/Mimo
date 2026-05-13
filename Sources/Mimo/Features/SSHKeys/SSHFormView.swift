@@ -51,7 +51,7 @@ struct SSHFormView: View {
             HStack(spacing: 12) {
                 MimoMascot(
                     mood: formViewModel.errorMessage != nil ? .worried : .curious,
-                    emotion: emotion(for: formViewModel.selectedKeyType),
+                    palette: palette(for: formViewModel.selectedKeyType),
                     size: 38,
                     animateAmbient: false
                 )
@@ -84,7 +84,7 @@ struct SSHFormView: View {
                 MimoPillButton(
                     title: Constants.Strings.generateKey,
                     icon: Constants.SystemImage.generateKey,
-                    emotion: emotion(for: formViewModel.selectedKeyType),
+                    palette: palette(for: formViewModel.selectedKeyType),
                     prominent: true
                 ) {
                     formViewModel.generateKey {
@@ -107,7 +107,7 @@ struct SSHFormView: View {
     @ViewBuilder
     private func keyTypePill(_ keyType: SSHKeyType) -> some View {
         let isSelected = formViewModel.selectedKeyType == keyType
-        let pillEmotion = emotion(for: keyType)
+        let pillPalette = palette(for: keyType)
 
         Button {
             withAnimation(MimoMotion.snap) {
@@ -121,7 +121,7 @@ struct SSHFormView: View {
                 .foregroundStyle(isSelected ? .white : MimoPalette.inkSecondary)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(isSelected ? pillEmotion.body : MimoPalette.surfaceSunken)
+                        .fill(isSelected ? pillPalette.body : MimoPalette.surfaceSunken)
                 )
                 .overlay(
                     Capsule(style: .continuous)
@@ -155,13 +155,15 @@ struct SSHFormView: View {
         }
     }
 
-    private func emotion(for keyType: SSHKeyType) -> MimoEmotion {
+    private func palette(for keyType: SSHKeyType) -> MimoPaintPalette {
+        let emotion: MimoEmotion
         switch keyType {
-        case .ed25519: return .joy
-        case .rsa:     return .fear
-        case .ecdsa:   return .disgust
-        case .dsa:     return .anger
+        case .ed25519: emotion = .joy
+        case .rsa:     emotion = .fear
+        case .ecdsa:   emotion = .disgust
+        case .dsa:     emotion = .anger
         }
+        return emotion.palette
     }
 
     @ViewBuilder

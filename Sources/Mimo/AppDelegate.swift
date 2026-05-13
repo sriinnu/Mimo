@@ -71,8 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshStatusIcon() {
         guard let button = statusItem?.button else { return }
-        let emotion = appModel.activeProfileID.map(MimoPalette.emotion(for:)) ?? .joy
-        if let image = mimoStatusBarImage(emotion: emotion, size: 18) {
+        let palette = appModel.activeProfile?.colorID.palette ?? MimoEmotion.joy.palette
+        if let image = mimoStatusBarImage(palette: palette, size: 18) {
             image.isTemplate = false
             button.image = image
         }

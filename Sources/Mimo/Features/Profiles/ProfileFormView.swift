@@ -67,7 +67,7 @@ struct ProfileFormView: View {
             HStack(spacing: 12) {
                 MimoMascot(
                     mood: viewModel.isFormValid ? .happy : .curious,
-                    emotion: previewEmotion,
+                    palette: previewPalette,
                     size: 40,
                     animateAmbient: false
                 )
@@ -90,6 +90,9 @@ struct ProfileFormView: View {
                 mimoField(label: Constants.Placeholder.gitUserName, text: $viewModel.gitUserName)
                 mimoField(label: Constants.Placeholder.gitEmail, text: $viewModel.gitEmail)
             }
+
+            sectionLabel("Color")
+            colorPicker
 
             sectionLabel(Constants.Strings.provider)
             Picker("", selection: $viewModel.selectedProvider) {
@@ -152,7 +155,7 @@ struct ProfileFormView: View {
                 MimoPillButton(
                     title: viewModel.isCreatingNewProfile ? "Create profile" : Constants.Strings.saveChanges,
                     icon: viewModel.isCreatingNewProfile ? Constants.SystemImage.profileAdd : Constants.SystemImage.checkmark,
-                    emotion: previewEmotion,
+                    palette: previewPalette,
                     prominent: true
                 ) {
                     viewModel.saveProfile(appModel: appModel, currentProfile: appModel.selectedProfile)
@@ -166,11 +169,47 @@ struct ProfileFormView: View {
         .mimoCard(cornerRadius: 22)
     }
 
-    private var previewEmotion: MimoEmotion {
-        if let selectedID = appModel.selectedProfileID {
-            return MimoPalette.emotion(for: selectedID)
+    private var previewPalette: MimoPaintPalette {
+        viewModel.colorID.palette
+    }
+
+    @ViewBuilder
+    private var colorPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(MimoProfileColor.allCases) { color in
+                colorChip(color)
+            }
         }
-        return .joy
+    }
+
+    @ViewBuilder
+    private func colorChip(_ color: MimoProfileColor) -> some View {
+        let isSelected = viewModel.colorID == color
+        Button {
+            withAnimation(MimoMotion.snap) { viewModel.colorID = color }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(color.body)
+                    .frame(width: isSelected ? 26 : 22, height: isSelected ? 26 : 22)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(Color.white.opacity(isSelected ? 0.95 : 0), lineWidth: 2)
+                    )
+                    .overlay(
+                        Circle()
+                            .strokeBorder(color.body.opacity(isSelected ? 0.6 : 0), lineWidth: 1)
+                            .padding(-3)
+                    )
+                    .shadow(color: color.body.opacity(isSelected ? 0.4 : 0), radius: 5)
+            }
+            .frame(width: 30, height: 30)
+            .accessibilityLabel(color.displayName)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+        }
+        .buttonStyle(.plain)
+        .mimoPress()
+        .help(color.displayName)
     }
 
     @ViewBuilder
