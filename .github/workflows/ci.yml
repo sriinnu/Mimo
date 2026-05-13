@@ -38,7 +38,7 @@ jobs:
 
       - name: Install Tuist
         run: |
-          curl -fsSL https://install.tuist.io | bash
+          brew install tuist
           tuist version
 
       - name: Tuist generate
