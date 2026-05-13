@@ -15,6 +15,7 @@ struct MimoMascot: View {
         case happy      // squinted-arc eyes, brief bounce
         case curious    // head tilted, wide eyes
         case worried    // drooped eyes, slumped body
+        case wincing    // eyes squeezed shut, quick head shake — wrong identity reaction
         case sleeping   // closed eyes (horizontal line)
     }
 
@@ -51,10 +52,20 @@ struct MimoMascot: View {
     @State private var blinking = false
     @State private var bouncing = false
     @State private var morphPhase: MorphPhase = .rest
+    @State private var winceShake: CGFloat = 0   // -1, 0, +1 — drives the head shake
+    @State private var winceSquash = false       // flinch squash on scaleY
 
     private var bodyWidth: CGFloat { size * 0.86 }
     private var bodyHeight: CGFloat { size * 1.02 }
     private let pupil = Color(red: 0.14, green: 0.11, blue: 0.09)
+
+    /// Composite rotation: curious head-tilt + wince shake.
+    private var compositeRotation: Double {
+        var deg: Double = 0
+        if mood == .curious { deg -= 8 }
+        deg += Double(winceShake) * 5
+        return deg
+    }
 
     var body: some View {
         ZStack {
@@ -66,19 +77,38 @@ struct MimoMascot: View {
         }
         .frame(width: size, height: size * 1.3)
         .scaleEffect(x: (bouncing ? 1.08 : 1.0) * morphPhase.scaleX,
-                     y: (bouncing ? 0.94 : 1.0) * morphPhase.scaleY,
+                     y: (bouncing ? 0.94 : 1.0) * (winceSquash ? 0.94 : 1.0) * morphPhase.scaleY,
                      anchor: .bottom)
-        .rotationEffect(.degrees(mood == .curious ? -8 : 0), anchor: .bottom)
+        .rotationEffect(.degrees(compositeRotation), anchor: .bottom)
         .offset(y: mood == .worried ? size * 0.03 : 0)
         .animation(MimoMotion.snap, value: mood)
         .animation(MimoMotion.bounce, value: bouncing)
         .animation(MimoMotion.bounce, value: palette)
         .animation(MimoMotion.snap, value: morphPhase)
+        .animation(MimoMotion.snap, value: winceShake)
+        .animation(MimoMotion.snap, value: winceSquash)
         .task(id: mood) {
             if mood == .happy {
                 bouncing = true
                 try? await Task.sleep(nanoseconds: 220_000_000)
                 bouncing = false
+            }
+            if mood == .wincing {
+                // Wince beat: squash + ±5° head shake over ~250ms,
+                // then settle. It's a flinch, not a posture.
+                winceSquash = true
+                winceShake = -1
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
+                winceShake = 1
+                try? await Task.sleep(nanoseconds: 130_000_000)
+                guard !Task.isCancelled else { return }
+                winceShake = 0
+                winceSquash = false
+            } else {
+                // Reset any in-flight wince state when mood flips away.
+                winceShake = 0
+                winceSquash = false
             }
         }
         .task(id: palette) {
@@ -178,6 +208,12 @@ struct MimoMascot: View {
             Capsule()
                 .fill(pupil)
                 .frame(width: size * 0.16, height: size * 0.022)
+        case .wincing:
+            // Eyes squeezed shut — a short upward-arc line (like a
+            // grimacing closed eye), thicker than the sleeping line.
+            WinceArc()
+                .stroke(pupil, style: StrokeStyle(lineWidth: size * 0.036, lineCap: .round))
+                .frame(width: size * 0.17, height: size * 0.08)
         case .worried:
             ZStack(alignment: .bottom) {
                 Circle()
@@ -218,37 +254,74 @@ private struct HappyArc: Shape {
     }
 }
 
+/// A short, upward-arching line — eyes squeezed shut in a flinch. Opens at the
+/// top, bowing slightly downward in the middle, like a grimace seen head-on.
+private struct WinceArc: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.midY),
+            control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.2)
+        )
+        return path
+    }
+}
+
 // MARK: - Status bar variant (eyes only)
 
 struct MimoEyes: View {
     var palette: MimoPaintPalette = MimoEmotion.joy.palette
     var size: CGFloat = 18
+    /// Status-bar variant rendering. `.normal` paints the open-eye dots,
+    /// `.wincing` paints squeezed-shut horizontal lines for the mismatch beat.
+    var mood: Mood = .normal
+
+    enum Mood: Equatable {
+        case normal
+        case wincing
+    }
 
     var body: some View {
         HStack(spacing: size * 0.18) {
-            eyeDot
-            eyeDot
+            eye
+            eye
         }
         .frame(width: size, height: size)
     }
 
-    private var eyeDot: some View {
-        ZStack {
-            Circle()
+    @ViewBuilder
+    private var eye: some View {
+        switch mood {
+        case .normal:
+            ZStack {
+                Circle()
+                    .fill(palette.body)
+                    .frame(width: size * 0.42, height: size * 0.42)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: size * 0.11, height: size * 0.11)
+                    .offset(x: size * 0.06, y: -size * 0.06)
+            }
+        case .wincing:
+            // Squeezed-shut line, drawn in the profile body color so it stays
+            // recognizable as Mimo's eyes (just closed) at status-bar size.
+            Capsule()
                 .fill(palette.body)
-                .frame(width: size * 0.42, height: size * 0.42)
-            Circle()
-                .fill(Color.white)
-                .frame(width: size * 0.11, height: size * 0.11)
-                .offset(x: size * 0.06, y: -size * 0.06)
+                .frame(width: size * 0.42, height: size * 0.10)
         }
     }
 }
 
 /// Renders the Mimo eyes to an NSImage for use as the status bar icon.
+/// `mood` selects between the resting eye-dots and the squeezed-shut wince line.
 @MainActor
-func mimoStatusBarImage(palette: MimoPaintPalette, size: CGFloat = 18) -> NSImage? {
-    let renderer = ImageRenderer(content: MimoEyes(palette: palette, size: size))
+func mimoStatusBarImage(
+    palette: MimoPaintPalette,
+    size: CGFloat = 18,
+    mood: MimoEyes.Mood = .normal
+) -> NSImage? {
+    let renderer = ImageRenderer(content: MimoEyes(palette: palette, size: size, mood: mood))
     renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0
     return renderer.nsImage
 }

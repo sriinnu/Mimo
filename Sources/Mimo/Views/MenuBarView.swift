@@ -17,6 +17,10 @@ struct MenuBarView: View {
     @State private var repoStatus: GitRepoStatus?
     @State private var showCloneSheet = false
     @State private var mascotMood: MimoMascot.Mood = .idle
+    /// Whether the mismatch card was visible on the *previous* render. When it
+    /// flips from true → false, we play a `.happy` bounce on the header mascot
+    /// to celebrate the fix.
+    @State private var wasMismatched: Bool = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -29,6 +33,17 @@ struct MenuBarView: View {
                 }
 
                 headerSection
+
+                if appModel.foregroundRepoState.hasMismatch {
+                    mismatchCard
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 10)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.92).combined(with: .opacity),
+                            removal: .scale(scale: 0.96).combined(with: .opacity)
+                        ))
+                }
+
                 MimoDivider().padding(.horizontal, 16)
 
                 profileListSection
@@ -46,6 +61,7 @@ struct MenuBarView: View {
                 quitButton
                     .padding(.bottom, 10)
             }
+            .animation(MimoMotion.snap, value: appModel.foregroundRepoState.hasMismatch)
         }
         .frame(width: Constants.Layout.popoverWidth)
         .fixedSize(horizontal: false, vertical: true)
@@ -55,12 +71,24 @@ struct MenuBarView: View {
         .onAppear {
             appModel.loadOnLaunch()
             loadRepoStatus()
+            wasMismatched = appModel.foregroundRepoState.hasMismatch
         }
         .task(id: appModel.activeProfileID) {
             guard appModel.activeProfileID != nil else { return }
             mascotMood = .happy
             try? await Task.sleep(nanoseconds: 900_000_000)
             mascotMood = .idle
+        }
+        .onChange(of: appModel.foregroundRepoState.hasMismatch) { newValue in
+            // True → false: user fixed the mismatch. Celebrate.
+            if wasMismatched && !newValue {
+                Task {
+                    mascotMood = .happy
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                    mascotMood = .idle
+                }
+            }
+            wasMismatched = newValue
         }
     }
 
@@ -114,6 +142,112 @@ struct MenuBarView: View {
         .padding(.horizontal, 16)
         .padding(.top, 14)
         .padding(.bottom, 12)
+    }
+
+    // MARK: - Mismatch warning card
+
+    /// Auto-detect card: appears when the foreground app's cwd is in a repo
+    /// that expects a *different* profile than the one currently active. The
+    /// fix is one tap — switch to the expected profile.
+    @ViewBuilder
+    private var mismatchCard: some View {
+        let state = appModel.foregroundRepoState
+        let activeProfile = appModel.activeProfile
+        let expectedProfile = state.expectedProfileID.flatMap { id in
+            appModel.availableProfiles.first(where: { $0.id == id })
+        }
+        let activePalette = activeProfile?.colorID.palette ?? MimoEmotion.joy.palette
+        let expectedPalette = expectedProfile?.colorID.palette ?? MimoEmotion.anger.palette
+
+        HStack(alignment: .top, spacing: 12) {
+            MimoMascot(
+                mood: .wincing,
+                palette: activePalette,
+                size: 36,
+                animateAmbient: false
+            )
+            .frame(width: 44, height: 50)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Wrong identity for this repo")
+                    .font(MimoFont.headline(13))
+                    .foregroundStyle(MimoPalette.ink)
+
+                if let repoRoot = state.repoRoot {
+                    Text(displayPath(for: repoRoot))
+                        .font(MimoFont.mono(10))
+                        .foregroundStyle(MimoPalette.inkSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                contextLine(
+                    activeName: activeProfile?.name ?? "no profile",
+                    expectedName: expectedProfile?.name ?? "another profile",
+                    repoPath: state.repoRoot.map { displayPath(for: $0) } ?? "this folder"
+                )
+                .font(MimoFont.body(11))
+                .foregroundStyle(MimoPalette.inkSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                if let expectedProfile {
+                    MimoPillButton(
+                        title: "Switch to \(expectedProfile.name)",
+                        icon: Constants.SystemImage.switchProfile,
+                        palette: expectedPalette,
+                        prominent: true
+                    ) {
+                        viewModel.switchProfile(appModel: appModel, to: expectedProfile)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .mimoCard(cornerRadius: 16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(expectedPalette.body.opacity(0.35), lineWidth: 1)
+        )
+    }
+
+    /// Renders the bold-name context sentence using AttributedString so the
+    /// profile names stand out without spinning up an extra HStack.
+    private func contextLine(
+        activeName: String,
+        expectedName: String,
+        repoPath: String
+    ) -> Text {
+        var attributed = AttributedString("You're currently ")
+        var active = AttributedString(activeName)
+        active.font = MimoFont.body(11, weight: .semibold)
+        active.foregroundColor = MimoPalette.ink
+        attributed.append(active)
+        attributed.append(AttributedString(", but "))
+        var path = AttributedString(repoPath)
+        path.font = MimoFont.mono(10, weight: .semibold)
+        path.foregroundColor = MimoPalette.ink
+        attributed.append(path)
+        attributed.append(AttributedString(" expects "))
+        var expected = AttributedString(expectedName)
+        expected.font = MimoFont.body(11, weight: .semibold)
+        expected.foregroundColor = MimoPalette.ink
+        attributed.append(expected)
+        attributed.append(AttributedString("."))
+        return Text(attributed)
+    }
+
+    /// Replaces `$HOME` with `~` for compact display in the card and tooltip.
+    private func displayPath(for url: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let path = url.path
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
     }
 
     // MARK: - Update banner
