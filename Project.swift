@@ -33,7 +33,7 @@ let project = Project(
                 "LSUIElement": true,
                 "NSHumanReadableCopyright": "Created by $(PROJECT_CREATOR)",
                 "SUFeedURL": "https://raw.githubusercontent.com/sriinnu/Mimo/main/appcast.xml",
-                "SUPublicEDKey": "",
+                "SUPublicEDKey": "v7i0OlDkub5CPo4ZouKT8NwLrj9ZQL2MqFAFGXUbl1s=",
                 "SUEnableAutomaticChecks": true
             ]),
             sources: ["Sources/Mimo/**"],

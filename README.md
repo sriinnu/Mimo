@@ -45,6 +45,16 @@ open Mimo.xcworkspace
 
 Run the `Mimo` scheme.
 
+### Local guardrails
+
+Pre-commit + pre-push hooks (branch validator, secret scanner, `tuist generate` parse check) install with:
+
+```bash
+~/Sriinnu/Personal/domain-knowledge/security/hooks/install-guardrails.sh .
+```
+
+Re-run after every fresh clone.
+
 ## Credit
 
 Forked from [Yefga's Switzy](https://github.com/yefga/Switzy) — rebranded, redesigned, extended. Original MIT license preserved alongside the new one.

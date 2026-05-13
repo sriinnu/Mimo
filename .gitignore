@@ -17,6 +17,12 @@ Derived/
 .swiftpm/
 Packages/
 
+# xcodebuild output (local builds)
+build/
+
+# Release artifacts (DMGs are produced by CI/local notarization, not committed)
+release/*.dmg
+
 # macOS
 .DS_Store
 
