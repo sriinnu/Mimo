@@ -1,0 +1,191 @@
+# ============================================================================
+# Mimo — Release workflow (codesign + notarize + Sparkle-sign + attach to release)
+# ============================================================================
+#
+# Triggered when a GitHub Release is published with a tag like `v1.0.2`.
+#
+# Steps:
+#   1. Build the app via Tuist + xcodebuild
+#   2. Codesign with Developer ID Application cert  (gated on BUILD_CERT_*)
+#   3. Notarize via notarytool + .p8 API key        (gated on APPLE_API_*)
+#   4. Staple the notarization ticket
+#   5. Pack into DMG
+#   6. Sign DMG via Sparkle's sign_update            (gated on SPARKLE_*)
+#   7. Update appcast.xml and upload DMG to the Release
+#
+# Each step that needs a secret is gated, so this workflow still runs
+# (and the build step still catches breakage) when secrets are missing.
+#
+# Required secrets (set with `gh secret set <NAME>`):
+#   BUILD_CERT_P12_BASE64   — base64 of Developer ID Application .p12
+#   BUILD_CERT_PASSWORD     — password used when exporting the .p12
+#   APPLE_API_KEY_ID        — App Store Connect Key ID (e.g. H59NNQSJ4X)
+#   APPLE_API_ISSUER_ID     — App Store Connect Issuer UUID
+#   APPLE_API_KEY_P8_BASE64 — base64 of the .p8 API key
+#   APPLE_TEAM_ID           — 10-char Apple Developer Team ID
+#   SPARKLE_PRIVATE_KEY     — base64 ed25519 private key (from generate-sparkle-key.sh)
+#   SPARKLE_PUBLIC_KEY      — base64 ed25519 public key (must match SUPublicEDKey)
+#
+# All third-party actions pinned to commit SHAs (mutable tags = supply-chain risk).
+# ============================================================================
+
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # upload assets, push appcast.xml
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    # Dormant until signing is fully wired up. Flip on with:
+    #   gh variable set RELEASE_ENABLED -b true
+    # Releases cut before that report "skipped" instead of failing on missing certs.
+    if: ${{ vars.RELEASE_ENABLED == 'true' }}
+
+    env:
+      VERSION_TAG: ${{ github.event.release.tag_name }}
+      APP_NAME: Mimo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Install Tuist
+        run: |
+          curl -fsSL https://install.tuist.io | bash
+          tuist version
+
+      - name: Tuist generate
+        run: tuist generate --no-open
+
+      # ── Codesign — only when cert secrets are present ────────────────
+      - name: Import Developer ID certificate
+        if: ${{ env.HAS_CERT == 'true' }}
+        env:
+          HAS_CERT: ${{ secrets.BUILD_CERT_P12_BASE64 != '' && 'true' || 'false' }}
+          CERT_B64: ${{ secrets.BUILD_CERT_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.BUILD_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN=build.keychain
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN
+          security default-keychain -s $KEYCHAIN
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN
+          security set-keychain-settings -lut 3600 $KEYCHAIN
+          echo "$CERT_B64" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 -k $KEYCHAIN -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN
+          rm /tmp/cert.p12
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -workspace Mimo.xcworkspace \
+            -scheme Mimo \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath build/Mimo.xcarchive \
+            archive
+
+      - name: Export .app
+        if: ${{ secrets.BUILD_CERT_P12_BASE64 != '' }}
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > /tmp/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>developer-id</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+          </dict></plist>
+          EOF
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/Mimo.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist /tmp/ExportOptions.plist
+
+      # ── Notarize — only when API key secrets are present ─────────────
+      - name: Notarize
+        if: ${{ secrets.APPLE_API_KEY_P8_BASE64 != '' && secrets.BUILD_CERT_P12_BASE64 != '' }}
+        env:
+          KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          KEY_P8: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          echo "$KEY_P8" | base64 --decode > /tmp/api_key.p8
+          ditto -ck --rsrc --sequesterRsrc --keepParent build/export/Mimo.app build/Mimo.zip
+          xcrun notarytool submit build/Mimo.zip \
+            --key /tmp/api_key.p8 \
+            --key-id "$KEY_ID" \
+            --issuer "$ISSUER_ID" \
+            --wait
+          xcrun stapler staple build/export/Mimo.app
+          rm /tmp/api_key.p8
+
+      - name: Create DMG
+        if: ${{ secrets.BUILD_CERT_P12_BASE64 != '' }}
+        run: |
+          mkdir -p release
+          DMG_PATH="release/${APP_NAME}-${VERSION_TAG}.dmg"
+          hdiutil create -volname "$APP_NAME" -srcfolder build/export/Mimo.app -ov -format UDZO "$DMG_PATH"
+          echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
+
+      # ── Sparkle sign — only when SPARKLE_PRIVATE_KEY is present ──────
+      - name: Sign DMG with Sparkle
+        if: ${{ secrets.SPARKLE_PRIVATE_KEY != '' && env.DMG_PATH != '' }}
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # Find sign_update inside the resolved Sparkle artifact.
+          SIGN_UPDATE=$(find ~/Library/Developer/Xcode/DerivedData -name "sign_update" -type f -perm +111 2>/dev/null | head -1)
+          if [ -z "$SIGN_UPDATE" ]; then
+            SIGN_UPDATE=$(find . -name "sign_update" -type f -perm +111 2>/dev/null | head -1)
+          fi
+          test -x "$SIGN_UPDATE" || { echo "sign_update not found"; exit 1; }
+          echo "$SPARKLE_PRIVATE_KEY" > /tmp/sparkle_priv
+          chmod 600 /tmp/sparkle_priv
+          SIGNATURE=$("$SIGN_UPDATE" -f /tmp/sparkle_priv "$DMG_PATH")
+          rm /tmp/sparkle_priv
+          echo "SPARKLE_SIGNATURE=$SIGNATURE" >> "$GITHUB_ENV"
+
+      - name: Upload DMG to release
+        if: ${{ env.DMG_PATH != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$VERSION_TAG" "$DMG_PATH" --clobber
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Mimo $VERSION_TAG"
+            echo ""
+            echo "| Step | Status |"
+            echo "|---|---|"
+            echo "| Build | ${{ job.status }} |"
+            echo "| Codesign | ${{ secrets.BUILD_CERT_P12_BASE64 != '' && 'enabled' || 'SKIPPED (no cert)' }} |"
+            echo "| Notarize | ${{ secrets.APPLE_API_KEY_P8_BASE64 != '' && 'enabled' || 'SKIPPED (no .p8)' }} |"
+            echo "| Sparkle sign | ${{ secrets.SPARKLE_PRIVATE_KEY != '' && 'enabled' || 'SKIPPED (no key)' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
