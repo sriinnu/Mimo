@@ -24,6 +24,17 @@ final class AppModel: ObservableObject {
     /// surface mismatch warnings, mascot wince, identity-narration tooltips.
     @Published var foregroundRepoState: ForegroundRepoState = .empty
 
+    // MARK: - Phantom Mode
+
+    /// When non-nil, phantom mode is active. The value is the profile id we
+    /// will switch back to after the next commit (or timeout). Set by
+    /// `PhantomModeService.start`, cleared on revert/cancel.
+    @Published var phantomReturnToID: UUID?
+
+    /// Timestamp the phantom session started — used for the in-UI "returning
+    /// to …" label and (eventually) telemetry. Cleared with `phantomReturnToID`.
+    @Published var phantomStartedAt: Date?
+
     // MARK: - Services
 
     private let gitConfig = GitConfigService()

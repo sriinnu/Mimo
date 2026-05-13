@@ -17,6 +17,7 @@ struct MimoMascot: View {
         case worried    // drooped eyes, slumped body
         case wincing    // eyes squeezed shut, quick head shake — wrong identity reaction
         case sleeping   // closed eyes (horizontal line)
+        case phantom    // temporary identity — domino mask over eyes
     }
 
     var mood: Mood = .idle
@@ -189,12 +190,38 @@ struct MimoMascot: View {
 
     @ViewBuilder
     private var eyesLayer: some View {
-        HStack(spacing: size * 0.13) {
-            eye
-            eye
+        ZStack {
+            HStack(spacing: size * 0.13) {
+                eye
+                eye
+            }
+            .scaleEffect(y: blinking ? 0.08 : 1.0, anchor: .center)
+            .animation(MimoMotion.heartbeat, value: blinking)
+
+            if mood == .phantom {
+                dominoMask
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
-        .scaleEffect(y: blinking ? 0.08 : 1.0, anchor: .center)
-        .animation(MimoMotion.heartbeat, value: blinking)
+        .animation(MimoMotion.bounce, value: mood)
+    }
+
+    /// Horizontal black band across both eyes — superhero / cat-burglar mask.
+    /// Sized as a fraction of mascot `size` so it scales with the body.
+    @ViewBuilder
+    private var dominoMask: some View {
+        // Mask roughly spans both eyes (eye width ~0.18, gap 0.13 → 0.49)
+        // with a touch of slack on each side and rounded ends.
+        Capsule(style: .continuous)
+            .fill(pupil)
+            .frame(width: size * 0.56, height: size * 0.085)
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 0.5)
+            )
+            .shadow(color: MimoPalette.shadow.opacity(0.5),
+                    radius: size * 0.01,
+                    y: size * 0.006)
     }
 
     @ViewBuilder
@@ -225,7 +252,9 @@ struct MimoMascot: View {
                     .offset(y: -size * 0.012)
             }
             .frame(width: size * 0.16, height: size * 0.16, alignment: .bottom)
-        case .idle, .curious:
+        case .idle, .curious, .phantom:
+            // Phantom uses the standard idle eye; the domino mask overlay
+            // is drawn on top of the eyes layer (see `eyesLayer`).
             ZStack {
                 Circle()
                     .fill(Color.white)

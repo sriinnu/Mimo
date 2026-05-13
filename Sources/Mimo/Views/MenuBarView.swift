@@ -111,10 +111,17 @@ struct MenuBarView: View {
 
     // MARK: - Header
 
+    /// Phantom mode overrides ambient mascot mood — the domino-masked face
+    /// is the strongest possible signal that you're operating as someone
+    /// else for one commit.
+    private var effectiveMascotMood: MimoMascot.Mood {
+        appModel.phantomReturnToID != nil ? .phantom : mascotMood
+    }
+
     @ViewBuilder
     private var headerSection: some View {
         HStack(spacing: 12) {
-            MimoMascot(mood: mascotMood, palette: activePalette, size: 44)
+            MimoMascot(mood: effectiveMascotMood, palette: activePalette, size: 44)
                 .frame(width: 56, height: 60)
 
             VStack(alignment: .leading, spacing: 1) {

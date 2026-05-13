@@ -13,6 +13,26 @@ struct ProfileRowView: View {
 
     private var palette: MimoPaintPalette { profile.colorID.palette }
 
+    /// True iff this row's profile is the one phantom will revert *to*.
+    /// We hide "Use once" on it (no sense phantom-ing into the return target)
+    /// and we know the active row is the phantom while this is non-nil.
+    private var isPhantomReturnTarget: Bool {
+        appModel.phantomReturnToID == profile.id
+    }
+
+    /// The currently-displayed-as-active row is showing the phantom identity
+    /// when phantom mode is on. Used to swap its badge for a phantom flavor.
+    private var isPhantomActive: Bool {
+        profile.isActive && appModel.phantomReturnToID != nil
+    }
+
+    /// Human-readable name of the profile we'll revert to (for the phantom
+    /// badge label). Falls back gracefully if the return profile was deleted.
+    private var phantomReturnName: String? {
+        guard let id = appModel.phantomReturnToID else { return nil }
+        return appModel.availableProfiles.first(where: { $0.id == id })?.name
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             ZStack {
@@ -37,7 +57,23 @@ struct ProfileRowView: View {
                     }
 
                     if profile.isActive {
-                        MimoBadge(text: "active", palette: palette, icon: "sparkles")
+                        if isPhantomActive, let returnName = phantomReturnName {
+                            // Phantom session is active — tap to cancel and revert.
+                            Button {
+                                PhantomModeService.shared.cancel(appModel: appModel)
+                            } label: {
+                                MimoBadge(
+                                    text: "phantom · returning to \(returnName)",
+                                    palette: palette,
+                                    icon: "theatermasks"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .mimoPress()
+                            .help("Cancel phantom mode and revert immediately")
+                        } else {
+                            MimoBadge(text: "active", palette: palette, icon: "sparkles")
+                        }
                     }
                 }
 
@@ -64,6 +100,24 @@ struct ProfileRowView: View {
                     if !profile.isActive {
                         MimoPillButton(title: "Activate", icon: nil, palette: palette, prominent: true) {
                             Task { await appModel.switchProfile(to: profile) }
+                        }
+
+                        if !isPhantomReturnTarget {
+                            MimoPillButton(title: "Use once", icon: "theatermasks", palette: palette) {
+                                let original = appModel.activeProfileID
+                                let repo = appModel.foregroundRepoState.repoRoot
+                                Task {
+                                    await PhantomModeService.shared.start(
+                                        asProfile: profile,
+                                        originalProfileID: original,
+                                        in: repo,
+                                        appModel: appModel
+                                    )
+                                }
+                            }
+                            .help(appModel.foregroundRepoState.repoRoot == nil
+                                  ? "Use this identity once. No foreground repo detected — will revert after 5 min."
+                                  : "Use this identity for the next commit, then revert.")
                         }
                     }
 
