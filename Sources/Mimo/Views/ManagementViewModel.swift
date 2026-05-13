@@ -25,7 +25,7 @@ final class ManagementViewModel: ObservableObject {
         switch tab {
         case .profile: return showProfileForm && isCreatingNewProfile
         case .ssh: return showNewSSHKeyForm
-        case .directories, .signing: return false
+        case .directories, .signing, .timeMachine: return false
         }
     }
 

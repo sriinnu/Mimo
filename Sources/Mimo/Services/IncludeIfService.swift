@@ -44,11 +44,27 @@ actor IncludeIfService {
         if let key = profile.signingKey, !key.isEmpty {
             lines.append("\tsigningkey = \(key)")
         }
-        try lines.joined(separator: "\n").write(toFile: profileConfigPath.path, atomically: true, encoding: .utf8)
+        let newContent = lines.joined(separator: "\n")
+        let beforeContent = (try? String(contentsOfFile: profileConfigPath.path, encoding: .utf8))
+        try newContent.write(toFile: profileConfigPath.path, atomically: true, encoding: .utf8)
+
+        // Audit — per-profile gitconfig file.
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: profile.id,
+                profileName: profile.name,
+                scope: .mimoProfiles,
+                path: profileConfigPath.path,
+                summary: "wrote profile config for \(directoryPath)",
+                before: beforeContent,
+                after: newContent
+            )
+        )
 
         try await ensureIncludeIfBlock(
             condition: "gitdir:\(expandedDir)/",
-            path: profileConfigPath.path
+            path: profileConfigPath.path,
+            profile: profile
         )
     }
 
@@ -56,14 +72,30 @@ actor IncludeIfService {
 
     func removeMapping(directoryPath: String) async throws {
         let expandedDir = (directoryPath as NSString).expandingTildeInPath
-        try await removeIncludeIfBlock(condition: "gitdir:\(expandedDir)/")
+        try await removeIncludeIfBlock(
+            condition: "gitdir:\(expandedDir)/",
+            profile: nil
+        )
     }
 
     func removeMapping(for profileID: UUID) async throws {
         let configDir = mimoConfigDir()
         let profileConfigPath = configDir.appendingPathComponent("\(profileID.uuidString).gitconfig")
         if fileManager.fileExists(atPath: profileConfigPath.path) {
+            let beforeContent = try? String(contentsOfFile: profileConfigPath.path, encoding: .utf8)
             try fileManager.removeItem(at: profileConfigPath)
+            // Audit removal so it can be restored.
+            IdentityAuditLog.shared.record(
+                AuditEntry(
+                    profileID: profileID,
+                    profileName: "Profile \(profileID.uuidString.prefix(8))",
+                    scope: .mimoProfiles,
+                    path: profileConfigPath.path,
+                    summary: "deleted profile config file",
+                    before: beforeContent,
+                    after: nil
+                )
+            )
         }
         try await removeIncludeIfBlockContaining(path: profileConfigPath.path)
     }
@@ -100,16 +132,35 @@ actor IncludeIfService {
             .appendingPathComponent(".config/mimo/profiles")
     }
 
-    private func ensureIncludeIfBlock(condition: String, path: String) async throws {
-        try await removeIncludeIfBlock(condition: condition)
+    /// Audited variant — captures the full ~/.gitconfig snapshot. We store
+    /// the whole-file state (under .mimoProfiles scope on `path = gitconfig`)
+    /// because the structured includeIf block is intertwined with the rest
+    /// of the file and revert is safest as a verbatim restore.
+    private func ensureIncludeIfBlock(condition: String, path: String, profile: GitProfile) async throws {
+        let beforeGitconfig = try? String(contentsOfFile: gitconfigPath, encoding: .utf8)
+
+        try await removeIncludeIfBlock(condition: condition, profile: nil, suppressAudit: true)
         let block = "\n[includeIf \"\(condition)\"]\n\tpath = \(path)\n"
         guard let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: gitconfigPath)) else { return }
         try handle.seekToEnd()
         handle.write(Data(block.utf8))
         try handle.close()
+
+        let afterGitconfig = try? String(contentsOfFile: gitconfigPath, encoding: .utf8)
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: profile.id,
+                profileName: profile.name,
+                scope: .mimoProfiles,
+                path: gitconfigPath,
+                summary: "added includeIf for \(condition)",
+                before: beforeGitconfig,
+                after: afterGitconfig
+            )
+        )
     }
 
-    private func removeIncludeIfBlock(condition: String) async throws {
+    private func removeIncludeIfBlock(condition: String, profile: GitProfile?, suppressAudit: Bool = false) async throws {
         guard let content = try? String(contentsOfFile: gitconfigPath, encoding: .utf8) else { return }
         let lines = content.components(separatedBy: .newlines)
         var filtered: [String] = []
@@ -127,7 +178,23 @@ actor IncludeIfService {
             skip = false
             filtered.append(line)
         }
-        try filtered.joined(separator: "\n").write(toFile: gitconfigPath, atomically: true, encoding: .utf8)
+        let newContent = filtered.joined(separator: "\n")
+        guard newContent != content else { return }
+        try newContent.write(toFile: gitconfigPath, atomically: true, encoding: .utf8)
+
+        if !suppressAudit {
+            IdentityAuditLog.shared.record(
+                AuditEntry(
+                    profileID: profile?.id,
+                    profileName: profile?.name ?? "Mimo",
+                    scope: .mimoProfiles,
+                    path: gitconfigPath,
+                    summary: "removed includeIf for \(condition)",
+                    before: content,
+                    after: newContent
+                )
+            )
+        }
     }
 
     private func removeIncludeIfBlockContaining(path: String) async throws {
@@ -144,6 +211,20 @@ actor IncludeIfService {
             }
             filtered.append(line)
         }
-        try filtered.joined(separator: "\n").write(toFile: gitconfigPath, atomically: true, encoding: .utf8)
+        let newContent = filtered.joined(separator: "\n")
+        guard newContent != content else { return }
+        try newContent.write(toFile: gitconfigPath, atomically: true, encoding: .utf8)
+
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: nil,
+                profileName: "Mimo",
+                scope: .mimoProfiles,
+                path: gitconfigPath,
+                summary: "removed includeIf referencing \((path as NSString).lastPathComponent)",
+                before: content,
+                after: newContent
+            )
+        )
     }
 }
