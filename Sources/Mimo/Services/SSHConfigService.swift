@@ -69,6 +69,12 @@ actor SSHConfigService {
         try String(contentsOfFile: sshConfigPath, encoding: .utf8)
     }
 
+    /// Returns nil if the file doesn't exist — used for audit before-state.
+    private func readContentOrNil() -> String? {
+        guard FileManager.default.fileExists(atPath: sshConfigPath) else { return nil }
+        return try? readContent()
+    }
+
     private func writeContent(_ content: String) throws {
         try content.write(toFile: sshConfigPath, atomically: true, encoding: .utf8)
     }
@@ -113,6 +119,11 @@ actor SSHConfigService {
     }
 
     func applyHostBlock(for profile: GitProfile, provider: GitProvider, allProfiles: [GitProfile]) throws {
+        // Snapshot before for audit. Captures whole-file state so revert
+        // can restore it verbatim — block-level diffs are too fragile here
+        // (ordering, neighboring blocks, whitespace).
+        let beforeSnapshot = readContentOrNil()
+
         try ensureConfigExists()
         let block = buildBlock(for: profile, provider: provider, allProfiles: allProfiles)
         var content = try readContent()
@@ -122,16 +133,35 @@ actor SSHConfigService {
             content += "\n\n\(block)"
         }
         try writeContent(content)
+
+        recordAudit(
+            profile: profile,
+            summary: "added SSH host block for \(provider.defaultHost)",
+            before: beforeSnapshot,
+            after: content
+        )
     }
 
     func removeHostBlock(for profile: GitProfile) throws {
+        let beforeSnapshot = readContentOrNil()
+
         var content = try readContent()
         guard let block = extractBlock(for: profile.id, from: content) else { return }
         content = content.replacingOccurrences(of: block, with: "")
-        try writeContent(content.collapsingBlankLines())
+        let final = content.collapsingBlankLines()
+        try writeContent(final)
+
+        recordAudit(
+            profile: profile,
+            summary: "removed SSH host block",
+            before: beforeSnapshot,
+            after: final
+        )
     }
 
     func removeAllHostBlocks() throws {
+        let beforeSnapshot = readContentOrNil()
+
         try ensureConfigExists()
         let lines = try readContent().components(separatedBy: .newlines)
         var filtered: [String] = []
@@ -150,7 +180,35 @@ actor SSHConfigService {
                 i += 1
             }
         }
-        try writeContent(filtered.joined(separator: "\n").collapsingBlankLines())
+        let final = filtered.joined(separator: "\n").collapsingBlankLines()
+        try writeContent(final)
+
+        // No specific profile — record under a synthetic system entry.
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: nil,
+                profileName: "Mimo",
+                scope: .sshConfig,
+                path: sshConfigPath,
+                summary: "cleared all Mimo SSH host blocks",
+                before: beforeSnapshot,
+                after: final
+            )
+        )
+    }
+
+    private func recordAudit(profile: GitProfile, summary: String, before: String?, after: String?) {
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: profile.id,
+                profileName: profile.name,
+                scope: .sshConfig,
+                path: sshConfigPath,
+                summary: summary,
+                before: before,
+                after: after
+            )
+        )
     }
 }
 

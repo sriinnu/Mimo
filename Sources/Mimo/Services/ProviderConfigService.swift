@@ -11,6 +11,12 @@ actor ProviderConfigService {
 
     private let shell = ShellService()
 
+    private func currentValue(_ key: String) async -> String? {
+        guard let v = try? await shell.run("git", arguments: ["config", "--global", key]),
+              !v.isEmpty else { return nil }
+        return v
+    }
+
     func applyProviderConfig(_ profile: GitProfile, provider: GitProvider) async throws {
         guard provider != .custom else { return }
 
@@ -18,18 +24,14 @@ actor ProviderConfigService {
         let sshPrefix = provider.sshURLPrefix
 
         if !httpsPrefix.isEmpty {
-            _ = try await shell.run("git", arguments: [
-                "config", "--global",
-                "url.\(sshPrefix).insteadOf", httpsPrefix
-            ])
+            let key = "url.\(sshPrefix).insteadOf"
+            try await auditedSet(key: key, value: httpsPrefix, profile: profile)
         }
 
         if let sshKeyPath = profile.sshKeyPath, !sshKeyPath.isEmpty {
             let expandedPath = (sshKeyPath as NSString).expandingTildeInPath
             let sshCommand = "ssh -i \(expandedPath)"
-            _ = try await shell.run("git", arguments: [
-                "config", "--global", "core.sshCommand", sshCommand
-            ])
+            try await auditedSet(key: "core.sshCommand", value: sshCommand, profile: profile)
         }
     }
 
@@ -38,15 +40,12 @@ actor ProviderConfigService {
 
         let sshPrefix = provider.sshURLPrefix
         if !sshPrefix.isEmpty {
-            _ = try? await shell.run("git", arguments: [
-                "config", "--global", "--unset", "url.\(sshPrefix).insteadOf"
-            ])
+            let key = "url.\(sshPrefix).insteadOf"
+            try await auditedUnset(key: key, profile: profile)
         }
 
         if let sshKeyPath = profile.sshKeyPath, !sshKeyPath.isEmpty {
-            _ = try? await shell.run("git", arguments: [
-                "config", "--global", "--unset", "core.sshCommand"
-            ])
+            try await auditedUnset(key: "core.sshCommand", profile: profile)
         }
     }
 
@@ -64,5 +63,37 @@ actor ProviderConfigService {
             IdentityFile \(expandedPath)
             User git
         """
+    }
+
+    // MARK: - Audited primitives
+
+    private func auditedSet(key: String, value: String, profile: GitProfile) async throws {
+        let before = await currentValue(key)
+        _ = try await shell.run("git", arguments: ["config", "--global", key, value])
+        guard before != value else { return }
+        IdentityAuditLog.shared.record(
+            .gitConfigGlobal(
+                profileID: profile.id,
+                profileName: profile.name,
+                key: key,
+                before: before,
+                after: value
+            )
+        )
+    }
+
+    private func auditedUnset(key: String, profile: GitProfile) async throws {
+        let before = await currentValue(key)
+        _ = try? await shell.run("git", arguments: ["config", "--global", "--unset", key])
+        guard before != nil else { return }
+        IdentityAuditLog.shared.record(
+            .gitConfigGlobal(
+                profileID: profile.id,
+                profileName: profile.name,
+                key: key,
+                before: before,
+                after: nil
+            )
+        )
     }
 }

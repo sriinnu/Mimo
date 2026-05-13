@@ -54,6 +54,9 @@ enum Constants {
         static let clean = "checkmark.circle.fill"
         static let hookOn = "checkmark.shield.fill"
         static let hookOff = "shield.slash"
+        static let timeMachine = "clock.arrow.circlepath"
+        static let undo = "arrow.uturn.backward"
+        static let trash = "trash"
     }
 
     // MARK: - Font Sizes
@@ -233,6 +236,7 @@ enum Constants {
         case ssh = "SSH"
         case directories = "Dirs"
         case signing = "Sign"
+        case timeMachine = "Time"
 
         var id: String { rawValue }
     }

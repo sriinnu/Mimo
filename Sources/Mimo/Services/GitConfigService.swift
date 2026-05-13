@@ -57,47 +57,57 @@ actor GitConfigService {
         try? await shell.run("git", arguments: ["config", "--global", "core.sshCommand"])
     }
 
+    private func currentValue(_ key: String) async -> String? {
+        guard let v = try? await shell.run("git", arguments: ["config", "--global", key]),
+              !v.isEmpty else { return nil }
+        return v
+    }
+
     // MARK: - Switch Profile
 
     @discardableResult
     func applyProfile(_ profile: GitProfile) async throws -> Bool {
-        _ = try await shell.run("git", arguments: ["config", "--global", "user.name", profile.userName])
-        _ = try await shell.run("git", arguments: ["config", "--global", "user.email", profile.userEmail])
+        try await setGlobal("user.name", to: profile.userName, profile: profile)
+        try await setGlobal("user.email", to: profile.userEmail, profile: profile)
 
         // SSH command
         if let sshKeyPath = profile.sshKeyPath, !sshKeyPath.isEmpty {
             let expandedPath = (sshKeyPath as NSString).expandingTildeInPath
             let sshCommand = "ssh -i \(expandedPath)"
-            _ = try await shell.run("git", arguments: ["config", "--global", "core.sshCommand", sshCommand])
+            try await setGlobal("core.sshCommand", to: sshCommand, profile: profile)
         } else {
-            _ = try? await shell.run("git", arguments: ["config", "--global", "--unset", "core.sshCommand"])
+            try await unsetGlobal("core.sshCommand", profile: profile)
         }
 
         // Signing
         switch profile.signingType {
         case .gpg:
-            _ = try await shell.run("git", arguments: ["config", "--global", "commit.gpgSign", "true"])
-            _ = try await shell.run("git", arguments: ["config", "--global", "gpg.format", "openpgp"])
+            try await setGlobal("commit.gpgSign", to: "true", profile: profile)
+            try await setGlobal("gpg.format", to: "openpgp", profile: profile)
             if let key = profile.signingKey, !key.isEmpty {
-                _ = try await shell.run("git", arguments: ["config", "--global", "user.signingkey", key])
+                try await setGlobal("user.signingkey", to: key, profile: profile)
             }
         case .ssh:
-            _ = try await shell.run("git", arguments: ["config", "--global", "commit.gpgSign", "true"])
-            _ = try await shell.run("git", arguments: ["config", "--global", "gpg.format", "ssh"])
+            try await setGlobal("commit.gpgSign", to: "true", profile: profile)
+            try await setGlobal("gpg.format", to: "ssh", profile: profile)
             if let key = profile.signingKey ?? profile.sshKeyPath, !key.isEmpty {
-                _ = try await shell.run("git", arguments: ["config", "--global", "user.signingkey", key])
+                try await setGlobal("user.signingkey", to: key, profile: profile)
             }
         case .none:
-            _ = try? await shell.run("git", arguments: ["config", "--global", "--unset", "commit.gpgSign"])
-            _ = try? await shell.run("git", arguments: ["config", "--global", "--unset", "gpg.format"])
-            _ = try? await shell.run("git", arguments: ["config", "--global", "--unset", "user.signingkey"])
+            try await unsetGlobal("commit.gpgSign", profile: profile)
+            try await unsetGlobal("gpg.format", profile: profile)
+            try await unsetGlobal("user.signingkey", profile: profile)
         }
 
         // Credential helper
         if profile.credentialHelper == .none {
-            _ = try? await shell.run("git", arguments: ["config", "--global", "--unset", "credential.helper"])
+            try await unsetGlobal("credential.helper", profile: profile)
         } else {
-            _ = try await shell.run("git", arguments: ["config", "--global", "credential.helper", profile.credentialHelper.rawValue])
+            try await setGlobal(
+                "credential.helper",
+                to: profile.credentialHelper.rawValue,
+                profile: profile
+            )
         }
 
         // Provider URL rewriting
@@ -115,5 +125,48 @@ actor GitConfigService {
         return profiles.first { profile in
             profile.userName == name && profile.userEmail == email
         }?.id
+    }
+
+    // MARK: - Audited writes
+    //
+    // Every config write goes through these two helpers. They read the
+    // pre-state, mutate, then drop a line in the audit log so the user
+    // can scroll back later and undo any single change.
+
+    private func setGlobal(_ key: String, to value: String, profile: GitProfile) async throws {
+        let before = await currentValue(key)
+        _ = try await shell.run("git", arguments: ["config", "--global", key, value])
+
+        // Skip noisy no-op rows — if nothing actually changed, no audit.
+        guard before != value else { return }
+
+        IdentityAuditLog.shared.record(
+            .gitConfigGlobal(
+                profileID: profile.id,
+                profileName: profile.name,
+                key: key,
+                before: before,
+                after: value
+            )
+        )
+    }
+
+    private func unsetGlobal(_ key: String, profile: GitProfile) async throws {
+        let before = await currentValue(key)
+        // Unset is allowed to fail (key may not be set); we don't propagate.
+        _ = try? await shell.run("git", arguments: ["config", "--global", "--unset", key])
+
+        // No audit if nothing was there to begin with.
+        guard before != nil else { return }
+
+        IdentityAuditLog.shared.record(
+            .gitConfigGlobal(
+                profileID: profile.id,
+                profileName: profile.name,
+                key: key,
+                before: before,
+                after: nil
+            )
+        )
     }
 }

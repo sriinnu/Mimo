@@ -11,6 +11,7 @@ import SwiftUI
 struct ManagementView: View {
     @EnvironmentObject private var appModel: AppModel
     @ObservedObject private var themeStore = MimoThemeStore.shared
+    @ObservedObject private var auditLog = IdentityAuditLog.shared
     @StateObject private var viewModel = ManagementViewModel()
     @StateObject private var sshKeysViewModel = SSHKeysViewModel()
 
@@ -89,7 +90,7 @@ struct ManagementView: View {
                         }
                     case .ssh:
                         viewModel.showNewSSHKeyForm.toggle()
-                    case .directories, .signing:
+                    case .directories, .signing, .timeMachine:
                         break
                     }
                 }
@@ -173,6 +174,8 @@ struct ManagementView: View {
             return (appModel.directoryProfiles.count, Constants.SystemImage.directories)
         case .signing:
             return (appModel.availableProfiles.filter { $0.signingType != .none }.count, Constants.SystemImage.signing)
+        case .timeMachine:
+            return (auditLog.entries.count, Constants.SystemImage.timeMachine)
         }
     }
 
@@ -199,6 +202,9 @@ struct ManagementView: View {
                     SigningConfigView()
                         .environmentObject(appModel)
                 }
+            case .timeMachine:
+                AuditLogView()
+                    .environmentObject(appModel)
             }
         }
         .animation(MimoMotion.snap, value: appModel.selectedManagementTab)

@@ -47,6 +47,7 @@ final class AppModel: ObservableObject {
             isLoading = true
             loadSavedProfiles()
             loadSavedDirectoryProfiles()
+            await IdentityAuditLog.shared.reload()
             await importCurrentGitProfileIfNeeded()
             await detectActiveProfile()
             isLoading = false
