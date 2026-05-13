@@ -17,6 +17,7 @@ final class ProfileFormViewModel: ObservableObject {
     @Published var signingType: SigningType = .none
     @Published var signingKey: String = ""
     @Published var credentialHelper: CredentialHelper = .osxkeychain
+    @Published var colorID: MimoProfileColor = .sunshine
 
     @Published var isCreatingNewProfile: Bool = false
     @Published var showForm: Bool = false
@@ -38,6 +39,7 @@ final class ProfileFormViewModel: ObservableObject {
         signingType = profile.signingType
         signingKey = profile.signingKey ?? ""
         credentialHelper = profile.credentialHelper
+        colorID = profile.colorID
     }
 
     func resetForm() {
@@ -50,6 +52,9 @@ final class ProfileFormViewModel: ObservableObject {
         signingType = .none
         signingKey = ""
         credentialHelper = .osxkeychain
+        // Pick a fresh random suggestion so back-to-back new profiles get
+        // visually distinct mascot tints out of the gate.
+        colorID = MimoProfileColor.allCases.randomElement() ?? .sunshine
     }
 
     func saveProfile(appModel: AppModel, currentProfile: GitProfile?) {
@@ -62,7 +67,8 @@ final class ProfileFormViewModel: ObservableObject {
                 provider: selectedProvider,
                 providerURL: providerURL.isEmpty ? nil : providerURL,
                 signingType: signingType,
-                credentialHelper: credentialHelper
+                credentialHelper: credentialHelper,
+                colorID: colorID
             )
             appModel.addOrUpdateProfile(newProfile)
             appModel.selectedProfileID = newProfile.id
@@ -82,6 +88,7 @@ final class ProfileFormViewModel: ObservableObject {
             updated.signingType = signingType
             updated.signingKey = signingKey.isEmpty ? nil : signingKey
             updated.credentialHelper = credentialHelper
+            updated.colorID = colorID
             appModel.addOrUpdateProfile(updated)
             withAnimation {
                 showForm = false

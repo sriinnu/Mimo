@@ -198,13 +198,10 @@ enum MimoPalette {
         }
     }
 
-    // MARK: - Profile color derivation
-
-    static func emotion(for profileID: UUID) -> MimoEmotion {
-        let bytes = withUnsafeBytes(of: profileID.uuid) { Array($0) }
-        let sum = bytes.reduce(0) { $0 &+ Int($1) }
-        return MimoEmotion.allCases[sum % MimoEmotion.allCases.count]
-    }
+    // Profile color derivation was removed when identity was decoupled from
+    // emotion. Profiles now own their `colorID` directly (MimoProfileColor).
+    // The old UUID-hash assignment lives on as MimoProfileColor.defaultFor(profileID:)
+    // for migrating legacy profiles to a deterministic default color.
 }
 
 // MARK: - Color helpers

@@ -10,12 +10,12 @@ struct SSHKeyRowView: View {
     @ObservedObject var viewModel: SSHKeysViewModel
     @Binding var expandedKeyIDs: Set<UUID>
 
-    private var emotion: MimoEmotion {
+    private var palette: MimoPaintPalette {
         switch key.keyType {
-        case .ed25519: return .joy
-        case .rsa:     return .fear
-        case .ecdsa:   return .disgust
-        case .dsa:     return .anger
+        case .ed25519: return MimoEmotion.joy.palette
+        case .rsa:     return MimoEmotion.fear.palette
+        case .ecdsa:   return MimoEmotion.disgust.palette
+        case .dsa:     return MimoEmotion.anger.palette
         }
     }
 
@@ -46,7 +46,7 @@ struct SSHKeyRowView: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(emotion.body)
+                    .fill(palette.body)
                     .frame(width: 36, height: 36)
                 Image(systemName: Constants.SystemImage.key)
                     .font(.system(size: 14, weight: .bold))
@@ -58,7 +58,7 @@ struct SSHKeyRowView: View {
                     Text(key.filename)
                         .font(MimoFont.body(13, weight: .semibold))
                         .foregroundStyle(MimoPalette.ink)
-                    MimoBadge(text: key.keyType.displayName, emotion: emotion)
+                    MimoBadge(text: key.keyType.displayName, palette: palette)
                 }
                 if let comment = key.comment {
                     Text(comment)
@@ -125,7 +125,7 @@ struct SSHKeyRowView: View {
             }
 
             HStack {
-                MimoPillButton(title: "Copy public key", icon: Constants.SystemImage.copy, emotion: emotion) {
+                MimoPillButton(title: "Copy public key", icon: Constants.SystemImage.copy, palette: palette) {
                     viewModel.copyPublicKey(key) {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(

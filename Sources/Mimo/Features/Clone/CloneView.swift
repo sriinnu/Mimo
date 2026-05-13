@@ -31,14 +31,16 @@ struct CloneView: View {
         appModel.availableProfiles.first { $0.provider == detectedProvider }
     }
 
-    private var providerEmotion: MimoEmotion {
+    private var providerPalette: MimoPaintPalette {
+        let emotion: MimoEmotion
         switch detectedProvider {
-        case .github:        return .fear
-        case .azureDevOps:   return .sadness
-        case .gitlab:        return .anger
-        case .bitbucket:     return .disgust
-        case .custom:        return .joy
+        case .github:        emotion = .fear
+        case .azureDevOps:   emotion = .sadness
+        case .gitlab:        emotion = .anger
+        case .bitbucket:     emotion = .disgust
+        case .custom:        emotion = .joy
         }
+        return emotion.palette
     }
 
     private var mascotMood: MimoMascot.Mood {
@@ -81,7 +83,7 @@ struct CloneView: View {
     @ViewBuilder
     private var headerBar: some View {
         HStack(spacing: 12) {
-            MimoMascot(mood: mascotMood, emotion: providerEmotion, size: 36, animateAmbient: false)
+            MimoMascot(mood: mascotMood, palette: providerPalette, size: 36, animateAmbient: false)
                 .frame(width: 48, height: 52)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -129,7 +131,7 @@ struct CloneView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(repoURL.isEmpty ? .clear : providerEmotion.body.opacity(0.6), lineWidth: 1.5)
+                        .strokeBorder(repoURL.isEmpty ? .clear : providerPalette.body.opacity(0.6), lineWidth: 1.5)
                 )
 
             if !repoURL.isEmpty && detectedProvider != .custom {
@@ -145,11 +147,11 @@ struct CloneView: View {
         HStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .fill(providerEmotion.wash)
+                    .fill(providerPalette.wash)
                     .frame(width: 24, height: 24)
                 Image(systemName: detectedProvider.iconName)
                     .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(providerEmotion.body)
+                    .foregroundStyle(providerPalette.body)
             }
             Text(detectedProvider.displayName)
                 .font(MimoFont.caption(11, weight: .semibold))
@@ -158,19 +160,19 @@ struct CloneView: View {
             Spacer()
 
             if let profile = matchedProfile {
-                let profileEmotion = MimoPalette.emotion(for: profile.id)
+                let profilePalette = profile.colorID.palette
                 HStack(spacing: 4) {
                     Circle()
-                        .fill(profileEmotion.body)
+                        .fill(profilePalette.body)
                         .frame(width: 6, height: 6)
                     Text(profile.name)
                         .font(MimoFont.caption(10, weight: .bold))
-                        .foregroundStyle(profileEmotion.body)
+                        .foregroundStyle(profilePalette.body)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(
-                    Capsule(style: .continuous).fill(profileEmotion.wash)
+                    Capsule(style: .continuous).fill(profilePalette.wash)
                 )
             }
         }
@@ -271,14 +273,14 @@ struct CloneView: View {
     @ViewBuilder
     private func profileChip(_ profile: GitProfile) -> some View {
         let isSelected = selectedProfileID == profile.id
-        let chipEmotion = MimoPalette.emotion(for: profile.id)
+        let chipPalette = profile.colorID.palette
 
         Button {
             withAnimation(MimoMotion.snap) { selectedProfileID = profile.id }
         } label: {
             HStack(spacing: 5) {
                 Circle()
-                    .fill(isSelected ? Color.white : chipEmotion.body)
+                    .fill(isSelected ? Color.white : chipPalette.body)
                     .frame(width: 7, height: 7)
                 Text(profile.name)
                     .font(MimoFont.caption(11, weight: isSelected ? .bold : .medium))
@@ -289,7 +291,7 @@ struct CloneView: View {
             .foregroundStyle(isSelected ? .white : MimoPalette.inkSecondary)
             .background(
                 Capsule(style: .continuous)
-                    .fill(isSelected ? chipEmotion.body : MimoPalette.surfaceSunken)
+                    .fill(isSelected ? chipPalette.body : MimoPalette.surfaceSunken)
             )
         }
         .buttonStyle(.plain)

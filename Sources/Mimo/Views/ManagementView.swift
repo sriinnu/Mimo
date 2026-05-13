@@ -51,7 +51,7 @@ struct ManagementView: View {
     @ViewBuilder
     private func statusToast(_ message: String) -> some View {
         HStack(spacing: 8) {
-            MimoEyes(emotion: .disgust, size: 14)
+            MimoEyes(palette: MimoEmotion.disgust.palette, size: 14)
             Text(message)
                 .font(MimoFont.body(12, weight: .semibold))
                 .foregroundStyle(MimoPalette.ink)

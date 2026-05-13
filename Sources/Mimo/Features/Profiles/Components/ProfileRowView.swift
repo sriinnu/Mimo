@@ -11,16 +11,16 @@ struct ProfileRowView: View {
     let profile: GitProfile
     let isSelected: Bool
 
-    private var emotion: MimoEmotion { MimoPalette.emotion(for: profile.id) }
+    private var palette: MimoPaintPalette { profile.colorID.palette }
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(emotion.body)
+                    .fill(palette.body)
                     .frame(width: 40, height: 40)
                 if profile.isActive {
-                    MimoEyes(emotion: emotion, size: 24)
+                    MimoEyes(palette: palette, size: 24)
                 }
             }
 
@@ -37,7 +37,7 @@ struct ProfileRowView: View {
                     }
 
                     if profile.isActive {
-                        MimoBadge(text: "active", emotion: emotion, icon: "sparkles")
+                        MimoBadge(text: "active", palette: palette, icon: "sparkles")
                     }
                 }
 
@@ -62,12 +62,12 @@ struct ProfileRowView: View {
             HStack(spacing: 8) {
                 if !viewModel.showForm || !isSelected {
                     if !profile.isActive {
-                        MimoPillButton(title: "Activate", icon: nil, emotion: emotion, prominent: true) {
+                        MimoPillButton(title: "Activate", icon: nil, palette: palette, prominent: true) {
                             Task { await appModel.switchProfile(to: profile) }
                         }
                     }
 
-                    MimoPillButton(title: "Edit", icon: "pencil", emotion: nil) {
+                    MimoPillButton(title: "Edit", icon: "pencil", palette: nil) {
                         appModel.selectedProfileID = profile.id
                         withAnimation(MimoMotion.snap) {
                             viewModel.showForm = true
@@ -76,7 +76,7 @@ struct ProfileRowView: View {
                         }
                     }
                 } else if isSelected && viewModel.showForm && !viewModel.isCreatingNewProfile {
-                    MimoPillButton(title: "Done", icon: Constants.SystemImage.checkmark, emotion: emotion, prominent: true) {
+                    MimoPillButton(title: "Done", icon: Constants.SystemImage.checkmark, palette: palette, prominent: true) {
                         withAnimation(MimoMotion.snap) {
                             viewModel.showForm = false
                         }
@@ -101,12 +101,12 @@ struct ProfileRowView: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(profile.isActive ? emotion.wash : MimoPalette.surfaceElevated)
+                .fill(profile.isActive ? palette.wash : MimoPalette.surfaceElevated)
                 .shadow(color: MimoPalette.shadow, radius: 10, y: 3)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(profile.isActive ? emotion.body.opacity(0.3) : .clear, lineWidth: 1.5)
+                .strokeBorder(profile.isActive ? palette.body.opacity(0.3) : .clear, lineWidth: 1.5)
         )
     }
 }

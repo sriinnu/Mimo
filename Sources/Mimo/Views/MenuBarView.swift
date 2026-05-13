@@ -77,9 +77,8 @@ struct MenuBarView: View {
         .ignoresSafeArea()
     }
 
-    private var activeEmotion: MimoEmotion {
-        if let id = appModel.activeProfileID { return MimoPalette.emotion(for: id) }
-        return .joy
+    private var activePalette: MimoPaintPalette {
+        appModel.activeProfile?.colorID.palette ?? MimoEmotion.joy.palette
     }
 
     // MARK: - Header
@@ -87,7 +86,7 @@ struct MenuBarView: View {
     @ViewBuilder
     private var headerSection: some View {
         HStack(spacing: 12) {
-            MimoMascot(mood: mascotMood, emotion: activeEmotion, size: 44)
+            MimoMascot(mood: mascotMood, palette: activePalette, size: 44)
                 .frame(width: 56, height: 60)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -184,7 +183,7 @@ struct MenuBarView: View {
     @ViewBuilder
     private var emptyProfileState: some View {
         VStack(spacing: 12) {
-            MimoMascot(mood: .curious, emotion: .joy, size: 90)
+            MimoMascot(mood: .curious, palette: MimoEmotion.joy.palette, size: 90)
                 .frame(height: 110)
                 .padding(.top, 6)
 
@@ -201,7 +200,7 @@ struct MenuBarView: View {
             MimoPillButton(
                 title: Constants.Strings.addProfile,
                 icon: Constants.SystemImage.plus,
-                emotion: .joy,
+                palette: MimoEmotion.joy.palette,
                 prominent: true
             ) {
                 appModel.openManagementWindow(tab: .profile)
@@ -216,7 +215,7 @@ struct MenuBarView: View {
     private func profileRow(profile: GitProfile) -> some View {
         let isActive = profile.id == appModel.activeProfileID
         let isHovered = viewModel.hoveredProfileID == profile.id
-        let emotion = MimoPalette.emotion(for: profile.id)
+        let palette = profile.colorID.palette
 
         Button {
             viewModel.switchProfile(appModel: appModel, to: profile)
@@ -224,10 +223,10 @@ struct MenuBarView: View {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(emotion.body)
+                        .fill(palette.body)
                         .frame(width: 28, height: 28)
                     if isActive {
-                        MimoEyes(emotion: emotion, size: 18)
+                        MimoEyes(palette: palette, size: 18)
                     }
                 }
 
@@ -251,18 +250,18 @@ struct MenuBarView: View {
                 Spacer()
 
                 if isActive {
-                    MimoBadge(text: "active", emotion: emotion)
+                    MimoBadge(text: "active", palette: palette)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(rowBackground(isActive: isActive, isHovered: isHovered, emotion: emotion))
+                    .fill(rowBackground(isActive: isActive, isHovered: isHovered, palette: palette))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(isActive ? emotion.body.opacity(0.3) : .clear, lineWidth: 1)
+                    .strokeBorder(isActive ? palette.body.opacity(0.3) : .clear, lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .onHover { hovering in viewModel.setHoveredProfile(id: profile.id, isHovering: hovering) }
@@ -272,8 +271,8 @@ struct MenuBarView: View {
         .animation(MimoMotion.snap, value: isActive)
     }
 
-    private func rowBackground(isActive: Bool, isHovered: Bool, emotion: MimoEmotion) -> Color {
-        if isActive { return emotion.wash }
+    private func rowBackground(isActive: Bool, isHovered: Bool, palette: MimoPaintPalette) -> Color {
+        if isActive { return palette.wash }
         if isHovered { return MimoPalette.surfaceSunken }
         return .clear
     }
@@ -309,7 +308,7 @@ struct MenuBarView: View {
             Spacer()
 
             if let active = appModel.activeProfile {
-                MimoBadge(text: active.name, emotion: MimoPalette.emotion(for: active.id))
+                MimoBadge(text: active.name, palette: active.colorID.palette)
             }
         }
         .padding(.horizontal, 16)

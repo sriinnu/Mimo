@@ -15,7 +15,7 @@ struct SigningConfigView: View {
             HStack(spacing: 12) {
                 MimoMascot(
                     mood: isGPGAvailable ? .idle : .worried,
-                    emotion: .anger,
+                    palette: MimoEmotion.anger.palette,
                     size: 38,
                     animateAmbient: false
                 )
@@ -76,13 +76,13 @@ struct SigningConfigView: View {
 
     @ViewBuilder
     private func profileSigningRow(profile: GitProfile) -> some View {
-        let emotion = MimoPalette.emotion(for: profile.id)
+        let palette = profile.colorID.palette
         let signs = profile.signingType != .none
 
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(emotion.body)
+                    .fill(palette.body)
                     .frame(width: 32, height: 32)
                 Image(systemName: signs ? Constants.SystemImage.shieldCheck : Constants.SystemImage.signing)
                     .font(.system(size: 12, weight: .semibold))
@@ -97,7 +97,7 @@ struct SigningConfigView: View {
 
                     MimoBadge(
                         text: profile.signingType.displayName.lowercased(),
-                        emotion: signs ? emotion : .fear
+                        palette: signs ? palette : MimoEmotion.fear.palette
                     )
                 }
 
@@ -111,7 +111,7 @@ struct SigningConfigView: View {
 
             Spacer()
 
-            MimoPillButton(title: "Edit", icon: "pencil", emotion: emotion) {
+            MimoPillButton(title: "Edit", icon: "pencil", palette: palette) {
                 appModel.selectedManagementTab = .profile
                 appModel.selectedProfileID = profile.id
             }

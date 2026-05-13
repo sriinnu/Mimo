@@ -21,12 +21,12 @@ struct SSHSidebarView: View {
 
     @ViewBuilder
     private func sshKeyRow(key: SSHKeyInfo) -> some View {
-        let emotion: MimoEmotion = {
+        let keyPalette: MimoPaintPalette = {
             switch key.keyType {
-            case .ed25519: return .joy
-            case .rsa:     return .fear
-            case .ecdsa:   return .disgust
-            case .dsa:     return .anger
+            case .ed25519: return MimoEmotion.joy.palette
+            case .rsa:     return MimoEmotion.fear.palette
+            case .ecdsa:   return MimoEmotion.disgust.palette
+            case .dsa:     return MimoEmotion.anger.palette
             }
         }()
 
@@ -38,7 +38,7 @@ struct SSHSidebarView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
-                    MimoBadge(text: key.keyType.displayName, emotion: emotion)
+                    MimoBadge(text: key.keyType.displayName, palette: keyPalette)
 
                     if let comment = key.comment {
                         Text(comment)

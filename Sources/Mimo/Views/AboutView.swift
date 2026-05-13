@@ -13,8 +13,8 @@ struct AboutView: View {
     @State private var mascotMood: MimoMascot.Mood = .idle
     @State private var emotionIndex: Int = 0
 
-    private var emotion: MimoEmotion {
-        MimoEmotion.allCases[emotionIndex % MimoEmotion.allCases.count]
+    private var palette: MimoPaintPalette {
+        MimoEmotion.allCases[emotionIndex % MimoEmotion.allCases.count].palette
     }
 
     var body: some View {
@@ -31,7 +31,7 @@ struct AboutView: View {
                         mascotMood = .idle
                     }
                 } label: {
-                    MimoMascot(mood: mascotMood, emotion: emotion, size: 130)
+                    MimoMascot(mood: mascotMood, palette: palette, size: 130)
                         .frame(width: 170, height: 185)
                 }
                 .buttonStyle(.plain)

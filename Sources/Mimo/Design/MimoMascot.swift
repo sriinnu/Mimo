@@ -19,7 +19,7 @@ struct MimoMascot: View {
     }
 
     var mood: Mood = .idle
-    var emotion: MimoEmotion = .joy
+    var palette: MimoPaintPalette = MimoEmotion.joy.palette
     var size: CGFloat = 100
     var animateAmbient: Bool = true
 
@@ -46,7 +46,7 @@ struct MimoMascot: View {
         .offset(y: mood == .worried ? size * 0.03 : 0)
         .animation(MimoMotion.snap, value: mood)
         .animation(MimoMotion.bounce, value: bouncing)
-        .animation(MimoMotion.bounce, value: emotion)
+        .animation(MimoMotion.bounce, value: palette)
         .task(id: mood) {
             if mood == .happy {
                 bouncing = true
@@ -70,11 +70,11 @@ struct MimoMascot: View {
     @ViewBuilder
     private var tuft: some View {
         Circle()
-            .fill(emotion.body)
+            .fill(palette.body)
             .frame(width: size * 0.11, height: size * 0.11)
             .overlay(
                 Circle()
-                    .fill(emotion.highlight)
+                    .fill(palette.highlight)
                     .frame(width: size * 0.04, height: size * 0.04)
                     .offset(x: -size * 0.015, y: -size * 0.015)
             )
@@ -95,7 +95,7 @@ struct MimoMascot: View {
             Ellipse()
                 .fill(
                     RadialGradient(
-                        colors: [emotion.highlight, emotion.body],
+                        colors: [palette.highlight, palette.body],
                         center: UnitPoint(x: 0.34, y: 0.28),
                         startRadius: 0,
                         endRadius: size * 0.62
@@ -183,7 +183,7 @@ private struct HappyArc: Shape {
 // MARK: - Status bar variant (eyes only)
 
 struct MimoEyes: View {
-    var emotion: MimoEmotion = .joy
+    var palette: MimoPaintPalette = MimoEmotion.joy.palette
     var size: CGFloat = 18
 
     var body: some View {
@@ -197,7 +197,7 @@ struct MimoEyes: View {
     private var eyeDot: some View {
         ZStack {
             Circle()
-                .fill(emotion.body)
+                .fill(palette.body)
                 .frame(width: size * 0.42, height: size * 0.42)
             Circle()
                 .fill(Color.white)
@@ -209,8 +209,8 @@ struct MimoEyes: View {
 
 /// Renders the Mimo eyes to an NSImage for use as the status bar icon.
 @MainActor
-func mimoStatusBarImage(emotion: MimoEmotion, size: CGFloat = 18) -> NSImage? {
-    let renderer = ImageRenderer(content: MimoEyes(emotion: emotion, size: size))
+func mimoStatusBarImage(palette: MimoPaintPalette, size: CGFloat = 18) -> NSImage? {
+    let renderer = ImageRenderer(content: MimoEyes(palette: palette, size: size))
     renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0
     return renderer.nsImage
 }

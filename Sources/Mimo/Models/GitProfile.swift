@@ -19,6 +19,9 @@ struct GitProfile: Identifiable, Equatable, Hashable {
     var signingType: SigningType
     var credentialHelper: CredentialHelper
     var isActive: Bool
+    /// Identity color — chosen by the user. Legacy profiles default to a
+    /// deterministic pick from their UUID so the visual experience stays stable.
+    var colorID: MimoProfileColor
 
     init(
         id: UUID = UUID(),
@@ -31,7 +34,8 @@ struct GitProfile: Identifiable, Equatable, Hashable {
         providerURL: String? = nil,
         signingType: SigningType = .none,
         credentialHelper: CredentialHelper = .osxkeychain,
-        isActive: Bool = false
+        isActive: Bool = false,
+        colorID: MimoProfileColor? = nil
     ) {
         self.id = id
         self.name = name
@@ -44,6 +48,7 @@ struct GitProfile: Identifiable, Equatable, Hashable {
         self.signingType = signingType
         self.credentialHelper = credentialHelper
         self.isActive = isActive
+        self.colorID = colorID ?? MimoProfileColor.defaultFor(profileID: id)
     }
 }
 
@@ -51,6 +56,7 @@ extension GitProfile: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, name, userName, userEmail, signingKey, sshKeyPath
         case provider, providerURL, signingType, credentialHelper, isActive
+        case colorID
     }
 
     init(from decoder: Decoder) throws {
@@ -66,6 +72,8 @@ extension GitProfile: Codable {
         signingType = (try? c.decode(SigningType.self, forKey: .signingType)) ?? .none
         credentialHelper = (try? c.decode(CredentialHelper.self, forKey: .credentialHelper)) ?? .osxkeychain
         isActive = try c.decode(Bool.self, forKey: .isActive)
+        colorID = (try? c.decode(MimoProfileColor.self, forKey: .colorID))
+            ?? MimoProfileColor.defaultFor(profileID: id)
     }
 }
 

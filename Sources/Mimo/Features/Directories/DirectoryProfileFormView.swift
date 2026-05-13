@@ -74,7 +74,7 @@ struct DirectoryProfileFormView: View {
                 MimoPillButton(
                     title: "Save mapping",
                     icon: Constants.SystemImage.checkmark,
-                    emotion: .disgust,
+                    palette: MimoEmotion.disgust.palette,
                     prominent: true
                 ) {
                     guard let profileID = selectedProfileID, !directoryPath.isEmpty else { return }
