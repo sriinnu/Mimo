@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updaterController: SPUStandardUpdaterController?
     #endif
     private let updaterService = UpdaterService()
+    private let repoStateService = RepoStateService()
 
     let appModel = AppModel()
 
@@ -34,6 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupPopover()
         observeActiveProfile()
+        repoStateService.start(observing: appModel)
 
         #if canImport(Sparkle)
         updaterController = SPUStandardUpdaterController(
