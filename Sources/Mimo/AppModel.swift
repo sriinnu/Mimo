@@ -19,6 +19,11 @@ final class AppModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
 
+    /// Snapshot of the foreground app's working-directory + git context.
+    /// Updated by `RepoStateService`; consumed (eventually) by views that
+    /// surface mismatch warnings, mascot wince, identity-narration tooltips.
+    @Published var foregroundRepoState: ForegroundRepoState = .empty
+
     // MARK: - Services
 
     private let gitConfig = GitConfigService()
