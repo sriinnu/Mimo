@@ -52,6 +52,8 @@ enum Constants {
         static let branch = "arrow.triangle.branch"
         static let dirty = "circle.badge.xmark"
         static let clean = "checkmark.circle.fill"
+        static let hookOn = "checkmark.shield.fill"
+        static let hookOff = "shield.slash"
     }
 
     // MARK: - Font Sizes
@@ -177,6 +179,13 @@ enum Constants {
         static let repoStatus = "Repository"
         static let noRepo = "No git repo detected"
         static let provider = "Provider"
+
+        // Pre-commit guardrail hook
+        static let precommitInstalled = "Guard on"
+        static let precommitMissing = "Guard off"
+        static let precommitInstallFailedTitle = "Couldn't install the guardrail"
+        static let precommitUninstallFailedTitle = "Couldn't remove the guardrail"
+        static let precommitOK = "OK"
     }
 
     // MARK: - Form Placeholders

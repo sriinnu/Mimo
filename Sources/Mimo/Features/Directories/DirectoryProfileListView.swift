@@ -9,6 +9,15 @@ struct DirectoryProfileListView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var showForm = false
 
+    // Pre-commit guardrail state. Service is @MainActor; we hold a single
+    // instance for the view's lifetime and re-check install status when
+    // the directory list changes or after an install/uninstall action.
+    @State private var hookService = PrecommitHookService()
+    @State private var installedRepos: Set<String> = []
+    @State private var hookErrorTitle: String = ""
+    @State private var hookErrorMessage: String = ""
+    @State private var showHookError = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
@@ -59,6 +68,13 @@ struct DirectoryProfileListView: View {
         }
         .padding(24)
         .animation(MimoMotion.snap, value: showForm)
+        .onAppear(perform: refreshHookStatus)
+        .onChange(of: appModel.directoryProfiles) { _ in refreshHookStatus() }
+        .alert(hookErrorTitle, isPresented: $showHookError) {
+            Button(Constants.Strings.precommitOK, role: .cancel) { }
+        } message: {
+            Text(hookErrorMessage)
+        }
     }
 
     @ViewBuilder
@@ -82,6 +98,8 @@ struct DirectoryProfileListView: View {
     private func directoryRow(mapping: DirectoryProfile) -> some View {
         let profile = appModel.availableProfiles.first { $0.id == mapping.profileID }
         let palette: MimoPaintPalette = profile?.colorID.palette ?? MimoEmotion.disgust.palette
+        let expandedPath = (mapping.directoryPath as NSString).expandingTildeInPath
+        let isInstalled = installedRepos.contains(expandedPath)
 
         HStack(spacing: 12) {
             ZStack {
@@ -93,19 +111,25 @@ struct DirectoryProfileListView: View {
                     .foregroundStyle(.white)
             }
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(mapping.directoryPath)
                     .font(MimoFont.mono(11, weight: .semibold))
                     .foregroundStyle(MimoPalette.ink)
                     .lineLimit(1)
 
-                HStack(spacing: 4) {
+                HStack(spacing: 6) {
                     Text("→")
                         .font(MimoFont.caption(10))
                         .foregroundStyle(MimoPalette.inkTertiary)
                     Text(profile?.name ?? "Unknown profile")
                         .font(MimoFont.caption(11, weight: .medium))
                         .foregroundStyle(MimoPalette.inkSecondary)
+
+                    hookPill(
+                        for: mapping,
+                        repoPath: expandedPath,
+                        isInstalled: isInstalled
+                    )
                 }
             }
 
@@ -131,5 +155,99 @@ struct DirectoryProfileListView: View {
                 .fill(MimoPalette.surfaceElevated)
                 .shadow(color: MimoPalette.shadow, radius: 8, y: 2)
         )
+    }
+
+    // MARK: - Hook pill
+
+    /// Small pill on each directory row indicating whether the pre-commit
+    /// guardrail is installed in that repo. Tapping toggles install/uninstall.
+    @ViewBuilder
+    private func hookPill(
+        for mapping: DirectoryProfile,
+        repoPath: String,
+        isInstalled: Bool
+    ) -> some View {
+        let palette: MimoPaintPalette = isInstalled
+            ? MimoEmotion.disgust.palette
+            : MimoEmotion.fear.palette
+        let title = isInstalled
+            ? Constants.Strings.precommitInstalled
+            : Constants.Strings.precommitMissing
+        let icon = isInstalled
+            ? Constants.SystemImage.hookOn
+            : Constants.SystemImage.hookOff
+
+        Button {
+            toggleHook(for: mapping, repoPath: repoPath, isInstalled: isInstalled)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 9, weight: .bold))
+                Text(title).font(MimoFont.caption(10, weight: .bold))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .foregroundStyle(palette.body)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(palette.wash)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(palette.body.opacity(0.4), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .mimoPress()
+        .help(isInstalled
+              ? "Pre-commit guardrail installed. Click to remove."
+              : "Install Mimo's pre-commit guardrail in this repo.")
+    }
+
+    // MARK: - Hook actions
+
+    private func toggleHook(
+        for mapping: DirectoryProfile,
+        repoPath: String,
+        isInstalled: Bool
+    ) {
+        guard let profile = appModel.availableProfiles.first(where: { $0.id == mapping.profileID }) else {
+            hookErrorTitle = Constants.Strings.precommitInstallFailedTitle
+            hookErrorMessage = "The profile for this directory is missing. Re-add the mapping and try again."
+            showHookError = true
+            return
+        }
+
+        do {
+            if isInstalled {
+                try hookService.uninstall(at: repoPath)
+                installedRepos.remove(repoPath)
+            } else {
+                try hookService.install(
+                    at: repoPath,
+                    profileID: profile.id,
+                    profileName: profile.name
+                )
+                installedRepos.insert(repoPath)
+            }
+        } catch {
+            hookErrorTitle = isInstalled
+                ? Constants.Strings.precommitUninstallFailedTitle
+                : Constants.Strings.precommitInstallFailedTitle
+            hookErrorMessage = error.localizedDescription
+            showHookError = true
+            // Re-derive from disk in case the on-disk state diverged.
+            refreshHookStatus()
+        }
+    }
+
+    private func refreshHookStatus() {
+        var found: Set<String> = []
+        for mapping in appModel.directoryProfiles {
+            let expanded = (mapping.directoryPath as NSString).expandingTildeInPath
+            if hookService.isInstalled(at: expanded) {
+                found.insert(expanded)
+            }
+        }
+        installedRepos = found
     }
 }
