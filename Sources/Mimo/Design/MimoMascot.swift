@@ -23,8 +23,34 @@ struct MimoMascot: View {
     var size: CGFloat = 100
     var animateAmbient: Bool = true
 
+    /// Phases of the costume-change transition that plays when `palette` flips.
+    /// Multi-beat squash → bounce-back → settle, so the mascot reads as
+    /// *changing costumes*, not just recoloring.
+    private enum MorphPhase {
+        case rest       // 1.0, 1.0
+        case squash     // 0.85, 1.10 — compressed sideways, pulled up
+        case stretch    // 1.10, 0.92 — rebound wider, slightly squat
+
+        var scaleX: CGFloat {
+            switch self {
+            case .rest: return 1.0
+            case .squash: return 0.85
+            case .stretch: return 1.10
+            }
+        }
+
+        var scaleY: CGFloat {
+            switch self {
+            case .rest: return 1.0
+            case .squash: return 1.10
+            case .stretch: return 0.92
+            }
+        }
+    }
+
     @State private var blinking = false
     @State private var bouncing = false
+    @State private var morphPhase: MorphPhase = .rest
 
     private var bodyWidth: CGFloat { size * 0.86 }
     private var bodyHeight: CGFloat { size * 1.02 }
@@ -39,20 +65,32 @@ struct MimoMascot: View {
                 .offset(y: -size * 0.06)
         }
         .frame(width: size, height: size * 1.3)
-        .scaleEffect(x: bouncing ? 1.08 : 1.0,
-                     y: bouncing ? 0.94 : 1.0,
+        .scaleEffect(x: (bouncing ? 1.08 : 1.0) * morphPhase.scaleX,
+                     y: (bouncing ? 0.94 : 1.0) * morphPhase.scaleY,
                      anchor: .bottom)
         .rotationEffect(.degrees(mood == .curious ? -8 : 0), anchor: .bottom)
         .offset(y: mood == .worried ? size * 0.03 : 0)
         .animation(MimoMotion.snap, value: mood)
         .animation(MimoMotion.bounce, value: bouncing)
         .animation(MimoMotion.bounce, value: palette)
+        .animation(MimoMotion.snap, value: morphPhase)
         .task(id: mood) {
             if mood == .happy {
                 bouncing = true
                 try? await Task.sleep(nanoseconds: 220_000_000)
                 bouncing = false
             }
+        }
+        .task(id: palette) {
+            // Costume change: squash → stretch → settle. ~0.6s total.
+            // Color tween runs in parallel via the existing .animation(_, value: palette).
+            morphPhase = .squash
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            morphPhase = .stretch
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            morphPhase = .rest
         }
         .task {
             guard animateAmbient else { return }
