@@ -86,6 +86,19 @@ final class IdentityAuditLog: ObservableObject {
         }
     }
 
+    // MARK: - Delete one
+
+    /// Remove a single entry from the timeline. The on-disk config change
+    /// Mimo previously made is left in place — only the trail of having
+    /// done it is erased. The caller (UI) is responsible for confirmation.
+    func delete(_ entry: AuditEntry) {
+        let cap = maxEntries
+        entries.removeAll { $0.id == entry.id }
+        Task.detached(priority: .utility) {
+            Self.deleteFromLog(id: entry.id, cap: cap)
+        }
+    }
+
     // Revert and persistence logic lives in extension files:
     //   IdentityAuditLog+Revert.swift
     //   IdentityAuditLog+Persistence.swift
