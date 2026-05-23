@@ -44,6 +44,7 @@ actor SSHConfigService {
         }
         if !fm.fileExists(atPath: sshConfigPath) {
             try "".write(toFile: sshConfigPath, atomically: true, encoding: .utf8)
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sshConfigPath)
         }
     }
 
@@ -53,7 +54,8 @@ actor SSHConfigService {
         if providerProfiles.count <= 1 {
             host = provider.defaultHost
         } else {
-            host = "\(provider.defaultHost)-\(profile.name.lowercased().replacingOccurrences(of: " ", with: "-"))"
+            let suffix = String(profile.id.uuidString.prefix(4))
+            host = "\(provider.defaultHost)-\(profile.name.lowercased().replacingOccurrences(of: " ", with: "-"))-\(suffix)"
         }
         let key = profile.sshKeyPath ?? ""
         return """
@@ -77,10 +79,15 @@ actor SSHConfigService {
 
     private func writeContent(_ content: String) throws {
         try content.write(toFile: sshConfigPath, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: sshConfigPath
+        )
     }
 
-    private func extractBlock(for id: UUID, from content: String) -> String? {
-        let tag = marker(for: id)
+    /// Visible to tests via `@testable import`.
+    static func extractBlock(for id: UUID, from content: String) -> String? {
+        let tag = "# Mimo:\(id.uuidString)"
         let lines = content.components(separatedBy: .newlines)
         guard let startIdx = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == tag }) else { return nil }
         var endIdx = startIdx + 1
@@ -90,6 +97,40 @@ actor SSHConfigService {
             endIdx += 1
         }
         return lines[startIdx..<endIdx].joined(separator: "\n")
+    }
+
+    private func extractBlock(for id: UUID, from content: String) -> String? {
+        Self.extractBlock(for: id, from: content)
+    }
+
+    /// Remove a marker-identified block from arbitrary config content. Visible to tests.
+    static func removeBlock(for id: UUID, from content: String) -> String {
+        guard let block = extractBlock(for: id, from: content) else { return content }
+        return content.replacingOccurrences(of: block, with: "")
+            .replacingOccurrences(of: "\n\n\n", with: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+    }
+
+    /// Parse host entries from arbitrary config content. Visible to tests.
+    static func parseConfig(_ content: String) -> [(host: String, hostName: String)] {
+        let lines = content.components(separatedBy: .newlines)
+        var results: [(String, String)] = []
+        var cur: (host: String, hostName: String)?
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("Host ") {
+                if let c = cur { results.append(c) }
+                let hostPattern = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                if hostPattern == "*" || hostPattern.contains("*") { cur = nil; continue }
+                cur = (host: hostPattern, hostName: "")
+            } else if cur != nil {
+                let parts = trimmed.split(separator: " ", maxSplits: 1).map(String.init)
+                guard parts.count == 2 else { continue }
+                if parts[0].lowercased() == "hostname" { cur?.hostName = parts[1] }
+            }
+        }
+        if let c = cur { results.append(c) }
+        return results
     }
 
     func readConfig() throws -> [SSHConfigEntry] {
@@ -119,6 +160,17 @@ actor SSHConfigService {
     }
 
     func applyHostBlock(for profile: GitProfile, provider: GitProvider, allProfiles: [GitProfile]) throws {
+        // Refuse to write a host block when inputs would yield empty Host
+        // or IdentityFile lines — SSH treats those as parse errors and
+        // refuses the whole config. If a stale block already exists for
+        // this profile, scrub it so the file doesn't keep a broken trace.
+        let keyPath = (profile.sshKeyPath ?? "").trimmingCharacters(in: .whitespaces)
+        let providerHost = provider.defaultHost.trimmingCharacters(in: .whitespaces)
+        guard !keyPath.isEmpty, !providerHost.isEmpty else {
+            try? removeHostBlock(for: profile)
+            return
+        }
+
         // Snapshot before for audit. Captures whole-file state so revert
         // can restore it verbatim — block-level diffs are too fragile here
         // (ordering, neighboring blocks, whitespace).
@@ -214,6 +266,10 @@ actor SSHConfigService {
 
 private extension String {
     func collapsingBlankLines() -> String {
-        replacingOccurrences(of: "\n\n\n", with: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+        var s = self
+        while s.contains("\n\n\n") {
+            s = s.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }
 }

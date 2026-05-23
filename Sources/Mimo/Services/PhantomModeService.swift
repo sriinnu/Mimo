@@ -93,6 +93,22 @@ final class PhantomModeService: ObservableObject {
         appModel.phantomReturnToID = originalProfileID
         appModel.phantomStartedAt = started
 
+        // Audit: phantom session started
+        let returnName = originalProfileID.flatMap { id in
+            appModel.availableProfiles.first(where: { $0.id == id })?.name
+        } ?? "none"
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: profile.id,
+                profileName: profile.name,
+                scope: .gitConfigGlobal,
+                summary: "phantom mode started (returning to \(returnName))",
+                before: nil,
+                after: profile.name,
+                configKey: "phantom"
+            )
+        )
+
         pollTask = Task { [weak self, weak appModel] in
             guard let self else { return }
             await self.runLoop(appModel: appModel)
@@ -106,11 +122,25 @@ final class PhantomModeService: ObservableObject {
         pollTask = nil
 
         let returnID = appModel.phantomReturnToID
+        let activeName = appModel.activeProfile?.name ?? "unknown"
         appModel.phantomReturnToID = nil
         appModel.phantomStartedAt = nil
         capturedRepoRoot = nil
         capturedHeadSHA = nil
         startDate = nil
+
+        // Audit: phantom session cancelled
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: returnID,
+                profileName: "Phantom",
+                scope: .gitConfigGlobal,
+                summary: "phantom mode cancelled (was \(activeName))",
+                before: activeName,
+                after: returnID.flatMap({ id in appModel.availableProfiles.first(where: { $0.id == id })?.name }) ?? "none",
+                configKey: "phantom"
+            )
+        )
 
         if let returnID,
            let original = appModel.availableProfiles.first(where: { $0.id == returnID }) {
@@ -165,12 +195,26 @@ final class PhantomModeService: ObservableObject {
     /// and tear down the poll task.
     private func revert(appModel: AppModel) {
         let returnID = appModel.phantomReturnToID
+        let activeName = appModel.activeProfile?.name ?? "unknown"
         pollTask = nil
         capturedRepoRoot = nil
         capturedHeadSHA = nil
         startDate = nil
         appModel.phantomReturnToID = nil
         appModel.phantomStartedAt = nil
+
+        // Audit: phantom session reverted (commit detected or timeout)
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: returnID,
+                profileName: "Phantom",
+                scope: .gitConfigGlobal,
+                summary: "phantom mode reverted (was \(activeName))",
+                before: activeName,
+                after: returnID.flatMap({ id in appModel.availableProfiles.first(where: { $0.id == id })?.name }) ?? "none",
+                configKey: "phantom"
+            )
+        )
 
         guard let returnID,
               let original = appModel.availableProfiles.first(where: { $0.id == returnID })

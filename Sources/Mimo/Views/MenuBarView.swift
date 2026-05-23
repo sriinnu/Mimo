@@ -425,7 +425,7 @@ struct MenuBarView: View {
         HStack(spacing: 10) {
             Image(systemName: status.isDirty ? Constants.SystemImage.dirty : Constants.SystemImage.clean)
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(status.isDirty ? MimoEmotion.anger.body : MimoEmotion.disgust.body)
+                .foregroundStyle(status.isDirty ? MimoEmotion.anger.body : MimoEmotion.serenity.body)
 
             VStack(alignment: .leading, spacing: 1) {
                 if let branch = status.branch {
@@ -541,9 +541,9 @@ struct MenuBarView: View {
 
     private func loadRepoStatus() {
         let service = GitStatusService()
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let path = appModel.foregroundRepoState.repoRoot?.path ?? FileManager.default.homeDirectoryForCurrentUser.path
         Task {
-            let status = await service.status(for: home)
+            let status = await service.status(for: path)
             await MainActor.run { repoStatus = status }
         }
     }

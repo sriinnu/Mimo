@@ -202,12 +202,16 @@ actor SSHKeyService {
         do {
             try fileManager.copyItem(atPath: sourcePath, toPath: destPath)
             try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destPath)
+            // Belt-and-suspenders: copy may inherit source permissions, so force 0o600 again
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destPath)
 
             // Also copy public key if it exists alongside
             let pubSource = "\(sourcePath).pub"
             let pubDest = "\(destPath).pub"
             if fileManager.fileExists(atPath: pubSource) {
                 try fileManager.copyItem(atPath: pubSource, toPath: pubDest)
+                try fileManager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: pubDest)
+                // Belt-and-suspenders: ensure public key is world-readable
                 try fileManager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: pubDest)
             }
         } catch {

@@ -14,6 +14,10 @@ struct ManagementView: View {
     @ObservedObject private var auditLog = IdentityAuditLog.shared
     @StateObject private var viewModel = ManagementViewModel()
     @StateObject private var sshKeysViewModel = SSHKeysViewModel()
+    @State private var showResetConfirmation = false
+    @State private var showImportAlert = false
+    @State private var importAlertMessage = ""
+    @State private var exportImportStatus: String?
 
     var body: some View {
         ZStack {
@@ -35,8 +39,14 @@ struct ManagementView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(1)
             }
+            if let message = exportImportStatus {
+                statusToast(message)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(1)
+            }
         }
         .animation(MimoMotion.settle, value: sshKeysViewModel.statusMessage)
+        .animation(MimoMotion.settle, value: exportImportStatus)
         .onAppear { sshKeysViewModel.loadKeys() }
     }
 
@@ -52,7 +62,7 @@ struct ManagementView: View {
     @ViewBuilder
     private func statusToast(_ message: String) -> some View {
         HStack(spacing: 8) {
-            MimoEyes(palette: MimoEmotion.disgust.palette, size: 14)
+            MimoEyes(palette: MimoEmotion.serenity.palette, size: 14)
             Text(message)
                 .font(MimoFont.body(12, weight: .semibold))
                 .foregroundStyle(MimoPalette.ink)
@@ -75,42 +85,91 @@ struct ManagementView: View {
             tabToggle
             Spacer()
 
-            Button {
-                withAnimation(MimoMotion.snap) {
-                    switch appModel.selectedManagementTab {
-                    case .profile:
-                        if !viewModel.showProfileForm {
-                            viewModel.showProfileForm = true
-                            viewModel.isCreatingNewProfile = true
-                        } else if viewModel.isCreatingNewProfile {
-                            viewModel.showProfileForm = false
-                            viewModel.isCreatingNewProfile = false
-                        } else {
-                            viewModel.isCreatingNewProfile = true
+            HStack(spacing: 8) {
+                // Add / toggle — primary action, stays prominent
+                Button {
+                    withAnimation(MimoMotion.snap) {
+                        switch appModel.selectedManagementTab {
+                        case .profile:
+                            if !viewModel.showProfileForm {
+                                viewModel.showProfileForm = true
+                                viewModel.isCreatingNewProfile = true
+                            } else if viewModel.isCreatingNewProfile {
+                                viewModel.showProfileForm = false
+                                viewModel.isCreatingNewProfile = false
+                            } else {
+                                viewModel.isCreatingNewProfile = true
+                            }
+                        case .ssh:
+                            viewModel.showNewSSHKeyForm.toggle()
+                        case .directories, .signing, .timeMachine:
+                            break
                         }
-                    case .ssh:
-                        viewModel.showNewSSHKeyForm.toggle()
-                    case .directories, .signing, .timeMachine:
-                        break
+                    }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(MimoPalette.marigold.opacity(0.16))
+                            .frame(width: 30, height: 30)
+                        Image(systemName: viewModel.isMinusIcon(tab: appModel.selectedManagementTab)
+                            ? Constants.SystemImage.minus
+                            : Constants.SystemImage.plus)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(MimoPalette.marigold)
                     }
                 }
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(MimoPalette.marigold.opacity(0.16))
-                        .frame(width: 30, height: 30)
-                    Image(systemName: viewModel.isMinusIcon(tab: appModel.selectedManagementTab)
-                        ? Constants.SystemImage.minus
-                        : Constants.SystemImage.plus)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(MimoPalette.marigold)
+                .buttonStyle(.plain)
+                .mimoPress()
+
+                // Overflow — Export / Import / Reset (destructive is buried here)
+                Menu {
+                    Button {
+                        exportProfiles()
+                    } label: {
+                        Label("Export profiles…", systemImage: "square.and.arrow.up")
+                    }
+                    Button {
+                        importProfiles()
+                    } label: {
+                        Label("Import profiles…", systemImage: "square.and.arrow.down")
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        showResetConfirmation = true
+                    } label: {
+                        Label("Reset all Mimo data…", systemImage: "trash")
+                    }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(MimoPalette.surfaceElevated)
+                            .frame(width: 30, height: 30)
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(MimoPalette.inkSecondary)
+                    }
                 }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 30, height: 30)
+                .help("More actions")
             }
-            .buttonStyle(.plain)
-            .mimoPress()
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
+        .alert("Factory reset?", isPresented: $showResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset everything", role: .destructive) {
+                factoryReset()
+            }
+        } message: {
+            Text("This removes all profiles, directory mappings, audit history, and per-profile config files. Your git config changes will be reverted too. This cannot be undone.")
+        }
+        .alert("Import profiles", isPresented: $showImportAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(importAlertMessage)
+        }
     }
 
     @ViewBuilder
@@ -208,5 +267,90 @@ struct ManagementView: View {
             }
         }
         .animation(MimoMotion.snap, value: appModel.selectedManagementTab)
+    }
+
+    // MARK: - Export / Import / Reset
+
+    private func exportProfiles() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "mimo-profiles.json"
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try JSONEncoder().encode(appModel.availableProfiles)
+            try data.write(to: url)
+            showExportImportStatus("Exported \(appModel.availableProfiles.count) profiles")
+        } catch {
+            showExportImportStatus("Export failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func importProfiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.json]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let imported = try JSONDecoder().decode([GitProfile].self, from: data)
+            for profile in imported {
+                appModel.addOrUpdateProfile(profile)
+            }
+            importAlertMessage = "Imported \(imported.count) profiles."
+            showImportAlert = true
+        } catch {
+            importAlertMessage = "Import failed: \(error.localizedDescription)"
+            showImportAlert = true
+        }
+    }
+
+    private func factoryReset() {
+        // 1. Clear all profiles (this also cleans up orphaned files via deleteProfile)
+        let profileIDs = appModel.availableProfiles.map(\.id)
+        for id in profileIDs {
+            appModel.deleteProfile(id: id)
+        }
+
+        // 2. Clear directory profiles
+        let dirIDs = appModel.directoryProfiles.map(\.id)
+        for id in dirIDs {
+            appModel.removeDirectoryProfile(id: id)
+        }
+
+        // 3. Clear audit log
+        auditLog.clear()
+
+        // 4. Clear SSH config host blocks
+        Task {
+            try? await SSHConfigService().removeAllHostBlocks()
+        }
+
+        // 5. Clear UserDefaults
+        UserDefaults.standard.removeObject(forKey: Constants.Persistence.profilesKey)
+        UserDefaults.standard.removeObject(forKey: Constants.Persistence.directoriesKey)
+
+        // 6. Remove ~/.config/mimo/ directory
+        let configDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/mimo")
+        try? FileManager.default.removeItem(at: configDir)
+
+        showExportImportStatus("All Mimo data has been reset")
+    }
+
+    private func showExportImportStatus(_ message: String) {
+        exportImportStatus = message
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if !Task.isCancelled {
+                exportImportStatus = nil
+            }
+        }
     }
 }

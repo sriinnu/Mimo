@@ -14,7 +14,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
     case sadness    // soft melancholy blue / twilight / pastel periwinkle / electric cyan
     case anger      // warm fire red / ember / pastel coral / neon magenta
     case fear       // pensive lavender / deep lavender / pastel lilac / electric purple
-    case disgust    // bright mint green / deep mint / pastel pistachio / acid lime
+    case serenity   // bright mint green / deep mint / pastel pistachio / acid lime
 
     var name: String {
         switch self {
@@ -22,7 +22,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
         case .sadness: return "Sadness"
         case .anger: return "Anger"
         case .fear: return "Fear"
-        case .disgust: return "Disgust"
+        case .serenity: return "Serenity"
         }
     }
 
@@ -35,7 +35,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return Color(light: .rgb(0x5A8FD8), dark: .rgb(0x7AA9E8))
             case .anger:   return Color(light: .rgb(0xE55A4E), dark: .rgb(0xF37268))
             case .fear:    return Color(light: .rgb(0xA989D9), dark: .rgb(0xBFA0E8))
-            case .disgust: return Color(light: .rgb(0x86C66D), dark: .rgb(0x9CD984))
+            case .serenity: return Color(light: .rgb(0x86C66D), dark: .rgb(0x9CD984))
             }
         case .light:
             // Pastel, soft-saturation. Reads as illustrated children's book.
@@ -44,7 +44,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return .rgb(0x79A8E5)
             case .anger:   return .rgb(0xF07065)
             case .fear:    return .rgb(0xBC9DE0)
-            case .disgust: return .rgb(0x9DD588)
+            case .serenity: return .rgb(0x9DD588)
             }
         case .night:
             switch self {
@@ -52,7 +52,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return .rgb(0x4A7CC0)
             case .anger:   return .rgb(0xD04A40)
             case .fear:    return .rgb(0x9272BF)
-            case .disgust: return .rgb(0x6FA85C)
+            case .serenity: return .rgb(0x6FA85C)
             }
         case .retro:
             // Neon. Saturation cranked, almost glowing.
@@ -61,7 +61,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return .rgb(0x00E5FF)
             case .anger:   return .rgb(0xFF1A5C)
             case .fear:    return .rgb(0xB045FF)
-            case .disgust: return .rgb(0x7FFF00)
+            case .serenity: return .rgb(0x7FFF00)
             }
         }
     }
@@ -87,7 +87,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return .rgb(0xA8C8F0)
             case .anger:   return .rgb(0xF59A92)
             case .fear:    return .rgb(0xD4BDF0)
-            case .disgust: return .rgb(0xB9E0A8)
+            case .serenity: return .rgb(0xB9E0A8)
             }
         case .light:
             switch self {
@@ -95,7 +95,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return .rgb(0xB8D2F0)
             case .anger:   return .rgb(0xF7A89F)
             case .fear:    return .rgb(0xD8C5EE)
-            case .disgust: return .rgb(0xC5E5B5)
+            case .serenity: return .rgb(0xC5E5B5)
             }
         case .night:
             switch self {
@@ -103,7 +103,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return .rgb(0x88B0E0)
             case .anger:   return .rgb(0xE88078)
             case .fear:    return .rgb(0xB8A0D8)
-            case .disgust: return .rgb(0x95C485)
+            case .serenity: return .rgb(0x95C485)
             }
         case .retro:
             // Highlight is even more luminescent — pure light core.
@@ -112,7 +112,7 @@ enum MimoEmotion: Int, CaseIterable, Hashable {
             case .sadness: return .rgb(0x88F0FF)
             case .anger:   return .rgb(0xFF6E9A)
             case .fear:    return .rgb(0xD088FF)
-            case .disgust: return .rgb(0xC8FF88)
+            case .serenity: return .rgb(0xC8FF88)
             }
         }
     }

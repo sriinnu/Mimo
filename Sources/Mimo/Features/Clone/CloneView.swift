@@ -37,7 +37,7 @@ struct CloneView: View {
         case .github:        emotion = .fear
         case .azureDevOps:   emotion = .sadness
         case .gitlab:        emotion = .anger
-        case .bitbucket:     emotion = .disgust
+        case .bitbucket:     emotion = .serenity
         case .custom:        emotion = .joy
         }
         return emotion.palette
@@ -310,7 +310,7 @@ struct CloneView: View {
                     Text(result.success ? "Done" : "Failed")
                         .font(MimoFont.caption(11, weight: .bold))
                 }
-                .foregroundStyle(result.success ? MimoEmotion.disgust.body : MimoEmotion.anger.body)
+                .foregroundStyle(result.success ? MimoEmotion.serenity.body : MimoEmotion.anger.body)
             }
             Spacer()
 
@@ -351,11 +351,11 @@ struct CloneView: View {
         HStack(alignment: .top, spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(result.success ? MimoEmotion.disgust.wash : MimoEmotion.anger.wash)
+                    .fill(result.success ? MimoEmotion.serenity.wash : MimoEmotion.anger.wash)
                     .frame(width: 28, height: 28)
                 Image(systemName: result.success ? Constants.SystemImage.checkmark : Constants.SystemImage.warning)
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(result.success ? MimoEmotion.disgust.body : MimoEmotion.anger.body)
+                    .foregroundStyle(result.success ? MimoEmotion.serenity.body : MimoEmotion.anger.body)
             }
             Text(result.output)
                 .font(MimoFont.mono(11))
@@ -380,10 +380,17 @@ struct CloneView: View {
         let dir = cloneDirectory
 
         Task {
-            let r = try? await cloneService.clone(url: url, into: dir, profile: profile)
-            await MainActor.run {
-                result = r
-                isCloning = false
+            do {
+                let r = try await cloneService.clone(url: url, into: dir, profile: profile)
+                await MainActor.run {
+                    result = r
+                    isCloning = false
+                }
+            } catch {
+                await MainActor.run {
+                    result = CloneResult(success: false, output: "Clone failed: \(error.localizedDescription)")
+                    isCloning = false
+                }
             }
         }
     }

@@ -66,6 +66,30 @@ struct SSHFormView: View {
                         .foregroundStyle(MimoPalette.inkSecondary)
                 }
                 Spacer()
+
+                Button {
+                    viewModel.importKey()
+                    withAnimation(MimoMotion.snap) {
+                        managementViewModel.showNewSSHKeyForm = false
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "tray.and.arrow.down")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Import existing")
+                            .font(MimoFont.caption(11, weight: .semibold))
+                    }
+                    .foregroundStyle(MimoPalette.inkSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(MimoPalette.surfaceSunken)
+                    )
+                }
+                .buttonStyle(.plain)
+                .mimoPress()
+                .help("Import an existing private key from disk")
             }
 
             sectionLabel(Constants.Strings.type)
@@ -151,7 +175,7 @@ struct SSHFormView: View {
                 Text(status)
                     .font(MimoFont.caption(11))
             }
-            .foregroundStyle(MimoEmotion.disgust.body)
+            .foregroundStyle(MimoEmotion.serenity.body)
         }
     }
 
@@ -160,7 +184,7 @@ struct SSHFormView: View {
         switch keyType {
         case .ed25519: emotion = .joy
         case .rsa:     emotion = .fear
-        case .ecdsa:   emotion = .disgust
+        case .ecdsa:   emotion = .serenity
         case .dsa:     emotion = .anger
         }
         return emotion.palette
