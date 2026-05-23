@@ -169,8 +169,6 @@ extension AuditEntry {
             summary = old == new
                 ? "rewrote \(key) (no change)"
                 : "changed \(key) from \(old) to \(new)"
-        case (nil, nil):
-            summary = "touched \(key)"
         }
         return AuditEntry(
             profileID: profileID,

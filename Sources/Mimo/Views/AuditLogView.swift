@@ -323,9 +323,9 @@ struct AuditLogView: View {
                 diffLine(prefix: "−", text: "(not set)", palette: MimoEmotion.anger.palette, faded: true)
             }
             if let after = entry.after {
-                diffLine(prefix: "+", text: after, palette: MimoEmotion.disgust.palette)
+                diffLine(prefix: "+", text: after, palette: MimoEmotion.serenity.palette)
             } else {
-                diffLine(prefix: "+", text: "(unset)", palette: MimoEmotion.disgust.palette, faded: true)
+                diffLine(prefix: "+", text: "(unset)", palette: MimoEmotion.serenity.palette, faded: true)
             }
         }
         .padding(10)
@@ -401,7 +401,7 @@ struct AuditLogView: View {
         revertingID = entry.id
         Task {
             do {
-                _ = try await auditLog.revert(entry)
+                _ = try await IdentityAuditLog.shared.revert(entry)
             } catch {
                 revertError = error.localizedDescription
                 showRevertError = true

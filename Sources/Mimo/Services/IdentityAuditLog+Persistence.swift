@@ -14,7 +14,7 @@ import Foundation
 /// Serializes all audit-log file I/O so concurrent writes never interleave.
 /// Each `write(entry:cap:)` call fully persists and reloads before the next
 /// one begins, eliminating the race where a reload can miss a prior write.
-private actor AuditLogWriter {
+actor AuditLogWriter {
     static let shared = AuditLogWriter()
 
     func write(entry: AuditEntry, cap: Int) async {
@@ -30,14 +30,14 @@ private actor AuditLogWriter {
 
 extension IdentityAuditLog {
 
-    nonisolated(unsafe) static let encoder: JSONEncoder = {
+    nonisolated static let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         e.outputFormatting = [.withoutEscapingSlashes]
         return e
     }()
 
-    nonisolated(unsafe) static let decoder: JSONDecoder = {
+    nonisolated static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d
