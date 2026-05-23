@@ -8,13 +8,16 @@ import SwiftUI
 struct SigningConfigView: View {
     @EnvironmentObject private var appModel: AppModel
     @State private var gpgKeys: [GPGKeyInfo] = []
+    @State private var sshKeys: [SSHKeyInfo] = []
     @State private var isGPGAvailable = false
 
     var body: some View {
+        let anyProfileUsesGPG = appModel.availableProfiles.contains { $0.signingType == .gpg }
+
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
                 MimoMascot(
-                    mood: isGPGAvailable ? .idle : .worried,
+                    mood: (!anyProfileUsesGPG || isGPGAvailable) ? .idle : .worried,
                     palette: MimoEmotion.anger.palette,
                     size: 38,
                     animateAmbient: false
@@ -32,10 +35,16 @@ struct SigningConfigView: View {
                 Spacer()
             }
 
-            if !isGPGAvailable {
+            if !isGPGAvailable && anyProfileUsesGPG {
                 gpgUnavailable
-            } else if !gpgKeys.isEmpty {
-                gpgKeysSection
+            }
+
+            if anyProfileUsesGPG {
+                if !gpgKeys.isEmpty { gpgKeysSection }
+                if !sshKeys.isEmpty { sshKeysSection }
+            } else {
+                if !sshKeys.isEmpty { sshKeysSection }
+                if !gpgKeys.isEmpty { gpgKeysSection }
             }
 
             VStack(spacing: 10) {
@@ -45,7 +54,7 @@ struct SigningConfigView: View {
             }
         }
         .padding(24)
-        .onAppear { loadGPGStatus() }
+        .onAppear { loadSigningOptions() }
     }
 
     @ViewBuilder
@@ -174,13 +183,77 @@ struct SigningConfigView: View {
         .mimoCard(cornerRadius: 16)
     }
 
-    private func loadGPGStatus() {
-        let service = GPGKeyService()
+    @ViewBuilder
+    private var sshKeysSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("SSH KEYS")
+                .font(MimoFont.caption(10, weight: .bold))
+                .foregroundStyle(MimoPalette.inkSecondary)
+                .textCase(.uppercase)
+
+            ForEach(sshKeys) { key in
+                let palette: MimoPaintPalette = {
+                    switch key.keyType {
+                    case .ed25519: return MimoEmotion.joy.palette
+                    case .rsa:     return MimoEmotion.fear.palette
+                    case .ecdsa:   return MimoEmotion.serenity.palette
+                    case .dsa:     return MimoEmotion.anger.palette
+                    }
+                }()
+
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(palette.body)
+                            .frame(width: 28, height: 28)
+                        Image(systemName: Constants.SystemImage.key)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            Text(key.filename)
+                                .font(MimoFont.body(12, weight: .semibold))
+                                .foregroundStyle(MimoPalette.ink)
+                                .lineLimit(1)
+                            MimoBadge(text: key.keyType.displayName, palette: palette)
+                        }
+                        if let comment = key.comment {
+                            Text(comment)
+                                .font(MimoFont.caption(10))
+                                .foregroundStyle(MimoPalette.inkTertiary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
+                    if let date = key.createdAt {
+                        Text(date, style: .date)
+                            .font(MimoFont.caption(10))
+                            .foregroundStyle(MimoPalette.inkTertiary)
+                    }
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(MimoPalette.surfaceElevated)
+                )
+            }
+        }
+        .padding(14)
+        .mimoCard(cornerRadius: 16)
+    }
+
+    private func loadSigningOptions() {
+        let gpgService = GPGKeyService()
         Task {
-            isGPGAvailable = await service.isGPGInstalled()
-            if let keys = try? await service.scanKeys() {
+            isGPGAvailable = await gpgService.isGPGInstalled()
+            if let keys = try? await gpgService.scanKeys() {
                 gpgKeys = keys
             }
+            sshKeys = (try? await SSHKeyService().scanKeys()) ?? []
         }
     }
 }
