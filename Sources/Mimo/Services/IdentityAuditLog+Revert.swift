@@ -34,6 +34,12 @@ extension IdentityAuditLog {
                 "Profile-file snapshots can't be reverted entry-by-entry. "
                 + "Switch profiles manually to restore a previous state."
             )
+
+        case .firstRunImport:
+            throw RevertError.notSupported(
+                "The first-run import moment is traceable but not revertable. "
+                + "Delete the imported profile if you want it gone."
+            )
         }
 
         // Flag the original entry as reverted on disk.

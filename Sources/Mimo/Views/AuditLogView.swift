@@ -19,6 +19,7 @@ struct AuditLogView: View {
     @State private var revertingID: UUID?
     @State private var revertError: String?
     @State private var showRevertError = false
+    @State private var entryToDelete: AuditEntry?
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -70,6 +71,24 @@ struct AuditLogView: View {
         } message: {
             Text(revertError ?? "Something went wrong.")
         }
+        .alert(
+            "Delete this entry?",
+            isPresented: Binding(
+                get: { entryToDelete != nil },
+                set: { if !$0 { entryToDelete = nil } }
+            ),
+            presenting: entryToDelete
+        ) { entry in
+            Button("Cancel", role: .cancel) { entryToDelete = nil }
+            Button("Delete", role: .destructive) {
+                withAnimation(MimoMotion.snap) {
+                    auditLog.delete(entry)
+                }
+                entryToDelete = nil
+            }
+        } message: { _ in
+            Text("This erases the row from Mimo's timeline. The config change she made is still applied — you just lose the ability to undo it from here.")
+        }
     }
 
     // MARK: - Header
@@ -99,6 +118,24 @@ struct AuditLogView: View {
                 trashButton
             }
         }
+    }
+
+    @ViewBuilder
+    private func deleteButton(_ entry: AuditEntry) -> some View {
+        Button {
+            entryToDelete = entry
+        } label: {
+            Image(systemName: Constants.SystemImage.trash)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(MimoEmotion.anger.body.opacity(0.65))
+                .padding(8)
+                .background(
+                    Circle().fill(MimoEmotion.anger.wash.opacity(0.5))
+                )
+        }
+        .buttonStyle(.plain)
+        .mimoPress()
+        .help("Delete this entry from the timeline")
     }
 
     @ViewBuilder
@@ -243,12 +280,13 @@ struct AuditLogView: View {
                 diffStrip(entry: entry)
             }
 
-            // Footer — path + undo
+            // Footer — path + delete + undo
             HStack(spacing: 10) {
                 if let path = entry.path {
                     pathChip(path)
                 }
                 Spacer()
+                deleteButton(entry)
                 MimoPillButton(
                     title: entry.isReverted ? "Undone" : (isReverting ? "Undoing..." : "Undo"),
                     icon: entry.isReverted ? Constants.SystemImage.checkmark : Constants.SystemImage.undo,
@@ -382,7 +420,7 @@ struct AuditLogView: View {
         switch entry.scope {
         case .gitConfigGlobal, .gitConfigRepo:
             return true
-        case .sshConfig, .mimoProfiles:
+        case .sshConfig, .mimoProfiles, .firstRunImport:
             return false
         }
     }

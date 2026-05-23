@@ -5,6 +5,25 @@
 
 import Foundation
 
+/// What Mimo found in `~/.gitconfig` at first launch. Any field can be
+/// nil; the onboarding sheet displays what's present.
+struct GitIdentitySnapshot: Identifiable {
+    let id = UUID()
+    let userName: String?
+    let userEmail: String?
+    let signingKey: String?
+    let signingType: SigningType
+    let sshKeyPath: String?
+
+    var hasAnything: Bool {
+        userName != nil || userEmail != nil || signingKey != nil || sshKeyPath != nil
+    }
+
+    var hasMinimumForProfile: Bool {
+        userName != nil && userEmail != nil
+    }
+}
+
 enum GitConfigError: LocalizedError {
     case gitNotInstalled
     case configNotFound
@@ -61,6 +80,46 @@ actor GitConfigService {
         guard let v = try? await shell.run("git", arguments: ["config", "--global", key]),
               !v.isEmpty else { return nil }
         return v
+    }
+
+    /// Snapshot of the user's existing global git identity, used by the
+    /// first-run onboarding sheet to decide what to offer for import.
+    /// Every field is independently optional — a partial identity (name
+    /// only, no email) still surfaces so the UI can show it accurately.
+    func currentIdentitySnapshot() async -> GitIdentitySnapshot {
+        async let name = currentUserName()
+        async let email = currentUserEmail()
+        async let signingKey = currentSigningKey()
+        async let sshCommand = currentSSHCommand()
+        async let commitGpgSign = currentValue("commit.gpgSign")
+        async let gpgFormat = currentValue("gpg.format")
+
+        let (n, e, k, ssh, sign, format) =
+            await (name, email, signingKey, sshCommand, commitGpgSign, gpgFormat)
+
+        let signingType: SigningType
+        if sign == "true" {
+            signingType = (format == "ssh") ? .ssh : .gpg
+        } else {
+            signingType = .none
+        }
+
+        return GitIdentitySnapshot(
+            userName: n,
+            userEmail: e,
+            signingKey: k,
+            signingType: signingType,
+            sshKeyPath: Self.parseSSHKeyPath(from: ssh)
+        )
+    }
+
+    /// `core.sshCommand` typically looks like `ssh -i /path/to/key` — pull
+    /// the path out so the imported profile has an sshKeyPath set.
+    static func parseSSHKeyPath(from sshCommand: String?) -> String? {
+        guard let cmd = sshCommand else { return nil }
+        let parts = cmd.split(separator: " ").map(String.init)
+        guard let idx = parts.firstIndex(of: "-i"), idx + 1 < parts.count else { return nil }
+        return parts[idx + 1]
     }
 
     // MARK: - Switch Profile

@@ -156,4 +156,15 @@ extension IdentityAuditLog {
         guard didChange else { return }
         try? rewriteCapped(all: updated, cap: cap, paths: paths)
     }
+
+    /// Rewrite the log without a specific entry. Deleting an entry only
+    /// erases the timeline record — the underlying config change Mimo
+    /// already made stays. The caller is responsible for confirming.
+    nonisolated static func deleteFromLog(id: UUID, cap: Int) {
+        let paths = AuditPaths.resolve()
+        let all = readAll(cap: Int.max)
+        let filtered = all.filter { $0.id != id }
+        guard filtered.count != all.count else { return }
+        try? rewriteCapped(all: filtered, cap: cap, paths: paths)
+    }
 }

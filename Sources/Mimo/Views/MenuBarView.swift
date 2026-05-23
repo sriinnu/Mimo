@@ -68,6 +68,10 @@ struct MenuBarView: View {
         .sheet(isPresented: $showCloneSheet) {
             CloneView().environmentObject(appModel)
         }
+        .sheet(item: $appModel.pendingFirstRunSnapshot) { snapshot in
+            OnboardingImportView(snapshot: snapshot)
+                .environmentObject(appModel)
+        }
         .onAppear {
             appModel.loadOnLaunch()
             loadRepoStatus()
