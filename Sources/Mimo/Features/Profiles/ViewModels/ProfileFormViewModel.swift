@@ -25,7 +25,21 @@ final class ProfileFormViewModel: ObservableObject {
     var isFormValid: Bool {
         !profileName.trimmingCharacters(in: .whitespaces).isEmpty
             && !gitUserName.trimmingCharacters(in: .whitespaces).isEmpty
-            && !gitEmail.trimmingCharacters(in: .whitespaces).isEmpty
+            && isValidEmail(gitEmail)
+    }
+
+    private func isValidEmail(_ email: String) -> Bool {
+        let trimmed = email.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        // Basic validation: must contain exactly one @ with non-empty local and domain parts,
+        // and domain must contain at least one dot.
+        let parts = trimmed.components(separatedBy: "@")
+        guard parts.count == 2,
+              !parts[0].isEmpty,
+              !parts[1].isEmpty,
+              parts[1].contains(".")
+        else { return false }
+        return true
     }
 
     func loadProfile(currentProfile: GitProfile?) {

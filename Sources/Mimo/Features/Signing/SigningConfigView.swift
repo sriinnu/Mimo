@@ -34,6 +34,8 @@ struct SigningConfigView: View {
 
             if !isGPGAvailable {
                 gpgUnavailable
+            } else if !gpgKeys.isEmpty {
+                gpgKeysSection
             }
 
             VStack(spacing: 10) {
@@ -122,6 +124,54 @@ struct SigningConfigView: View {
                 .fill(MimoPalette.surfaceElevated)
                 .shadow(color: MimoPalette.shadow, radius: 8, y: 2)
         )
+    }
+
+    @ViewBuilder
+    private var gpgKeysSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("GPG KEYS")
+                .font(MimoFont.caption(10, weight: .bold))
+                .foregroundStyle(MimoPalette.inkSecondary)
+                .textCase(.uppercase)
+
+            ForEach(gpgKeys) { key in
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(MimoEmotion.fear.palette.body)
+                            .frame(width: 28, height: 28)
+                        Image(systemName: Constants.SystemImage.key)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(key.userID)
+                            .font(MimoFont.body(12, weight: .semibold))
+                            .foregroundStyle(MimoPalette.ink)
+                            .lineLimit(1)
+                        Text(key.keyID.suffix(16))
+                            .font(MimoFont.mono(10))
+                            .foregroundStyle(MimoPalette.inkTertiary)
+                    }
+
+                    Spacer()
+
+                    if let date = key.createdAt {
+                        Text(date, style: .date)
+                            .font(MimoFont.caption(10))
+                            .foregroundStyle(MimoPalette.inkTertiary)
+                    }
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(MimoPalette.surfaceElevated)
+                )
+            }
+        }
+        .padding(14)
+        .mimoCard(cornerRadius: 16)
     }
 
     private func loadGPGStatus() {

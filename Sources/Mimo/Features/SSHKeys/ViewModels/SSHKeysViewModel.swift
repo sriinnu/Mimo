@@ -5,6 +5,7 @@
 //  Created by Srinivas Pendela on 28/03/26.
 //
 
+import AppKit
 import Foundation
 import Combine
 
@@ -86,8 +87,34 @@ final class SSHKeysViewModel: ObservableObject {
         showStatus(Constants.Strings.publicKeyCopied)
     }
 
+    // MARK: - Import
+
+    func importKey() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = []
+        panel.allowsOtherFileTypes = true
+        panel.message = "Select a private key file to import"
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let service = SSHKeyService()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await service.importKey(from: url.path)
+                loadKeys()
+                showStatus("Imported \(url.lastPathComponent)")
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     // MARK: - Toast
-    
+
     func showStatus(_ message: String) {
         statusMessage = message
         statusTask?.cancel()
