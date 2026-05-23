@@ -14,7 +14,7 @@ struct SSHKeyRowView: View {
         switch key.keyType {
         case .ed25519: return MimoEmotion.joy.palette
         case .rsa:     return MimoEmotion.fear.palette
-        case .ecdsa:   return MimoEmotion.disgust.palette
+        case .ecdsa:   return MimoEmotion.serenity.palette
         case .dsa:     return MimoEmotion.anger.palette
         }
     }

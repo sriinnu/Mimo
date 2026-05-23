@@ -77,11 +77,29 @@ final class AppModel: ObservableObject {
     }
 
     func deleteProfile(id: UUID) {
+        let profile = availableProfiles.first { $0.id == id }
         availableProfiles.removeAll { $0.id == id }
         if activeProfileID == id {
             activeProfileID = nil
         }
         saveProfiles()
+
+        Task {
+            // 1. Remove per-profile gitconfig file
+            let profileConfigPath = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/mimo/profiles/\(id.uuidString).gitconfig")
+            try? FileManager.default.removeItem(at: profileConfigPath)
+
+            // 2. Remove includeIf block from ~/.gitconfig
+            try? await IncludeIfService().removeMapping(for: id)
+
+            // 3. Remove SSH config host block (needs a GitProfile for the marker)
+            if let profile {
+                var tempProfile = profile
+                tempProfile.sshKeyPath = profile.sshKeyPath ?? ""
+                try? await SSHConfigService().removeHostBlock(for: tempProfile)
+            }
+        }
     }
 
     func switchProfile(to profile: GitProfile) async {

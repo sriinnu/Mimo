@@ -21,7 +21,7 @@ struct DirectoryProfileListView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
-                MimoMascot(mood: .idle, palette: MimoEmotion.disgust.palette, size: 36, animateAmbient: false)
+                MimoMascot(mood: .idle, palette: MimoEmotion.serenity.palette, size: 36, animateAmbient: false)
                     .frame(width: 48, height: 52)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -80,7 +80,7 @@ struct DirectoryProfileListView: View {
     @ViewBuilder
     private var emptyState: some View {
         VStack(spacing: 10) {
-            MimoMascot(mood: .curious, palette: MimoEmotion.disgust.palette, size: 80)
+            MimoMascot(mood: .curious, palette: MimoEmotion.serenity.palette, size: 80)
                 .frame(height: 96)
             Text("No directory mappings yet")
                 .font(MimoFont.headline(13))
@@ -97,7 +97,7 @@ struct DirectoryProfileListView: View {
     @ViewBuilder
     private func directoryRow(mapping: DirectoryProfile) -> some View {
         let profile = appModel.availableProfiles.first { $0.id == mapping.profileID }
-        let palette: MimoPaintPalette = profile?.colorID.palette ?? MimoEmotion.disgust.palette
+        let palette: MimoPaintPalette = profile?.colorID.palette ?? MimoEmotion.serenity.palette
         let expandedPath = (mapping.directoryPath as NSString).expandingTildeInPath
         let isInstalled = installedRepos.contains(expandedPath)
 
@@ -168,7 +168,7 @@ struct DirectoryProfileListView: View {
         isInstalled: Bool
     ) -> some View {
         let palette: MimoPaintPalette = isInstalled
-            ? MimoEmotion.disgust.palette
+            ? MimoEmotion.serenity.palette
             : MimoEmotion.fear.palette
         let title = isInstalled
             ? Constants.Strings.precommitInstalled
