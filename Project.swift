@@ -46,6 +46,7 @@ let project = Project(
                     "GENERATE_INFOPLIST_FILE": "YES",
                     "SWIFT_EMIT_LOC_STRINGS": "YES",
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
+                    "ENABLE_HARDENED_RUNTIME": "YES",
                 ]
             )
         ),
