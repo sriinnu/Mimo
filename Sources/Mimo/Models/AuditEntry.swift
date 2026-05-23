@@ -21,6 +21,10 @@ enum AuditScope: Codable, Equatable, Hashable {
     /// The contents of `~/.config/mimo/profiles/<UUID>.gitconfig` — the
     /// per-profile include file used by directory mappings.
     case mimoProfiles
+    /// First-run onboarding moment — the user chose to import (or skip
+    /// importing) the existing ~/.gitconfig identity as their first
+    /// Mimo profile. Not revertable, just traceable.
+    case firstRunImport
 
     // Stable string tag so a future schema rename doesn't break old logs.
     private enum CodingKeys: String, CodingKey {
@@ -33,6 +37,7 @@ enum AuditScope: Codable, Equatable, Hashable {
         case gitConfigRepo
         case sshConfig
         case mimoProfiles
+        case firstRunImport
     }
 
     init(from decoder: Decoder) throws {
@@ -45,6 +50,7 @@ enum AuditScope: Codable, Equatable, Hashable {
             self = .gitConfigRepo(path: path)
         case .sshConfig: self = .sshConfig
         case .mimoProfiles: self = .mimoProfiles
+        case .firstRunImport: self = .firstRunImport
         }
     }
 
@@ -60,6 +66,8 @@ enum AuditScope: Codable, Equatable, Hashable {
             try c.encode(Kind.sshConfig, forKey: .kind)
         case .mimoProfiles:
             try c.encode(Kind.mimoProfiles, forKey: .kind)
+        case .firstRunImport:
+            try c.encode(Kind.firstRunImport, forKey: .kind)
         }
     }
 
@@ -70,6 +78,7 @@ enum AuditScope: Codable, Equatable, Hashable {
         case .gitConfigRepo:   return "folder.fill"
         case .sshConfig:       return "key.horizontal.fill"
         case .mimoProfiles:    return "person.text.rectangle.fill"
+        case .firstRunImport:  return "sparkles"
         }
     }
 
@@ -80,6 +89,7 @@ enum AuditScope: Codable, Equatable, Hashable {
         case .gitConfigRepo(let p):   return "Repo · \((p as NSString).lastPathComponent)"
         case .sshConfig:              return "SSH config"
         case .mimoProfiles:           return "Mimo profile file"
+        case .firstRunImport:         return "First run"
         }
     }
 }

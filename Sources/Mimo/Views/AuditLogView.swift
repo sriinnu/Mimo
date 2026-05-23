@@ -382,7 +382,7 @@ struct AuditLogView: View {
         switch entry.scope {
         case .gitConfigGlobal, .gitConfigRepo:
             return true
-        case .sshConfig, .mimoProfiles:
+        case .sshConfig, .mimoProfiles, .firstRunImport:
             return false
         }
     }

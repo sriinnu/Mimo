@@ -35,6 +35,16 @@ final class AppModel: ObservableObject {
     /// to …" label and (eventually) telemetry. Cleared with `phantomReturnToID`.
     @Published var phantomStartedAt: Date?
 
+    // MARK: - First-Run Onboarding
+
+    /// Non-nil when the user has no profiles yet AND we found an existing
+    /// `~/.gitconfig` identity. The management window observes this and
+    /// presents the onboarding sheet so the user can opt-in (or skip)
+    /// instead of Mimo silently overwriting their config later.
+    @Published var pendingFirstRunSnapshot: GitIdentitySnapshot?
+
+    private let firstRunSeenKey = "com.sriinnu.mimo.firstRunSeen"
+
     // MARK: - Services
 
     private let gitConfig = GitConfigService()
@@ -59,7 +69,7 @@ final class AppModel: ObservableObject {
             loadSavedProfiles()
             loadSavedDirectoryProfiles()
             await IdentityAuditLog.shared.reload()
-            await importCurrentGitProfileIfNeeded()
+            await prepareFirstRunIfNeeded()
             await detectActiveProfile()
             isLoading = false
         }
@@ -164,26 +174,82 @@ final class AppModel: ObservableObject {
         availableProfiles.first { $0.id == activeProfileID }
     }
 
-    // MARK: - Import Current Git Config
+    // MARK: - First-Run Import
 
-    private func importCurrentGitProfileIfNeeded() async {
+    /// First-launch flow. If the user has no profiles yet and we haven't
+    /// already shown the onboarding once, snapshot the existing
+    /// `~/.gitconfig` identity. The view layer presents a sheet so the
+    /// user decides whether to import — Mimo never writes anything
+    /// silently here. Before this existed, Mimo would auto-create a
+    /// profile from `user.name` + `user.email`, then the first profile
+    /// switch would unset `commit.gpgSign` and `user.signingkey`.
+    private func prepareFirstRunIfNeeded() async {
         guard availableProfiles.isEmpty else { return }
+        guard !UserDefaults.standard.bool(forKey: firstRunSeenKey) else { return }
 
-        let name = await gitConfig.currentUserName()
-        let email = await gitConfig.currentUserEmail()
+        let snapshot = await gitConfig.currentIdentitySnapshot()
+        guard snapshot.hasMinimumForProfile else {
+            // Nothing useful to import — mark seen and move on so we
+            // don't keep asking on every launch of a fresh-config machine.
+            UserDefaults.standard.set(true, forKey: firstRunSeenKey)
+            return
+        }
 
-        guard let name, !name.isEmpty, let email, !email.isEmpty else { return }
+        pendingFirstRunSnapshot = snapshot
+    }
+
+    /// Called by the onboarding sheet when the user accepts the import.
+    /// Builds a profile from the snapshot, persists it, audits the moment,
+    /// and clears the pending state.
+    func acceptFirstRunImport() {
+        guard let snapshot = pendingFirstRunSnapshot,
+              let name = snapshot.userName,
+              let email = snapshot.userEmail
+        else { return }
 
         let profile = GitProfile(
             name: name,
             userName: name,
             userEmail: email,
-            sshKeyPath: nil,
+            signingKey: snapshot.signingKey,
+            sshKeyPath: snapshot.sshKeyPath,
+            signingType: snapshot.signingType,
             isActive: true
         )
         availableProfiles.append(profile)
         activeProfileID = profile.id
         saveProfiles()
+
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: profile.id,
+                profileName: profile.name,
+                scope: .firstRunImport,
+                summary: "imported existing identity: \(name) <\(email)>",
+                before: nil,
+                after: "\(name) <\(email)>"
+            )
+        )
+
+        UserDefaults.standard.set(true, forKey: firstRunSeenKey)
+        pendingFirstRunSnapshot = nil
+    }
+
+    /// Called by the onboarding sheet when the user picks "start blank".
+    /// Records the moment in audit so the user can see they declined.
+    func skipFirstRunImport() {
+        IdentityAuditLog.shared.record(
+            AuditEntry(
+                profileID: nil,
+                profileName: "Mimo",
+                scope: .firstRunImport,
+                summary: "user chose to start with no profiles",
+                before: nil,
+                after: nil
+            )
+        )
+        UserDefaults.standard.set(true, forKey: firstRunSeenKey)
+        pendingFirstRunSnapshot = nil
     }
 
     // MARK: - Directory Profiles
