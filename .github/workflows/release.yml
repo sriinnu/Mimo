@@ -2,7 +2,9 @@
 # Mimo — Release workflow (codesign + notarize + Sparkle-sign + attach to release)
 # ============================================================================
 #
-# Triggered when a GitHub Release is published with a tag like `v1.0.2`.
+# Triggered when a GitHub Release is published with a tag like `v1.0.3`,
+# OR manually via workflow_dispatch (pass the tag, e.g. v1.0.3, to rebuild
+# and re-attach to an existing release).
 #
 # Steps:
 #   1. Build the app via Tuist + xcodebuild
@@ -11,20 +13,12 @@
 #   4. Staple the notarization ticket
 #   5. Pack into DMG
 #   6. Sign DMG via Sparkle's sign_update            (gated on SPARKLE_*)
-#   7. Update appcast.xml and upload DMG to the Release
+#   7. Upload DMG to the Release + update appcast.xml
 #
-# Each step that needs a secret is gated, so this workflow still runs
-# (and the build step still catches breakage) when secrets are missing.
-#
-# Required secrets (set with `gh secret set <NAME>`):
-#   BUILD_CERT_P12_BASE64   — base64 of Developer ID Application .p12
-#   BUILD_CERT_PASSWORD     — password used when exporting the .p12
-#   APPLE_API_KEY_ID        — App Store Connect Key ID (e.g. H59NNQSJ4X)
-#   APPLE_API_ISSUER_ID     — App Store Connect Issuer UUID
-#   APPLE_API_KEY_P8_BASE64 — base64 of the .p8 API key
-#   APPLE_TEAM_ID           — 10-char Apple Developer Team ID
-#   SPARKLE_PRIVATE_KEY     — base64 ed25519 private key (from generate-sparkle-key.sh)
-#   SPARKLE_PUBLIC_KEY      — base64 ed25519 public key (must match SUPublicEDKey)
+# Each step that needs a secret is gated. IMPORTANT: the `secrets` context is
+# NOT allowed in step `if:` conditions, so secret presence is captured once
+# into job-level `env` (HAS_CERT / HAS_API_KEY / HAS_SPARKLE) and the step
+# `if:`s read those — not `secrets.*` directly.
 #
 # All third-party actions pinned to commit SHAs (mutable tags = supply-chain risk).
 # ============================================================================
@@ -34,6 +28,11 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build & attach (e.g. v1.0.3)"
+        required: true
 
 permissions:
   contents: write   # upload assets, push appcast.xml
@@ -50,12 +49,17 @@ jobs:
 
     # Dormant until signing is fully wired up. Flip on with:
     #   gh variable set RELEASE_ENABLED -b true
-    # Releases cut before that report "skipped" instead of failing on missing certs.
     if: ${{ vars.RELEASE_ENABLED == 'true' }}
 
     env:
-      VERSION_TAG: ${{ github.event.release.tag_name }}
+      # tag_name on release events; the dispatch input otherwise.
+      VERSION_TAG: ${{ github.event.release.tag_name || inputs.tag }}
       APP_NAME: Mimo
+      # Capture secret presence ONCE here — `secrets` is allowed in env, but
+      # NOT in step `if:` conditions. Steps below branch on these.
+      HAS_CERT: ${{ secrets.BUILD_CERT_P12_BASE64 != '' && 'true' || 'false' }}
+      HAS_API_KEY: ${{ secrets.APPLE_API_KEY_P8_BASE64 != '' && secrets.BUILD_CERT_P12_BASE64 != '' && 'true' || 'false' }}
+      HAS_SPARKLE: ${{ secrets.SPARKLE_PRIVATE_KEY != '' && 'true' || 'false' }}
 
     steps:
       - name: Checkout
@@ -78,7 +82,6 @@ jobs:
       - name: Import Developer ID certificate
         if: ${{ env.HAS_CERT == 'true' }}
         env:
-          HAS_CERT: ${{ secrets.BUILD_CERT_P12_BASE64 != '' && 'true' || 'false' }}
           CERT_B64: ${{ secrets.BUILD_CERT_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.BUILD_CERT_PASSWORD }}
         run: |
@@ -105,7 +108,7 @@ jobs:
             archive
 
       - name: Export .app
-        if: ${{ secrets.BUILD_CERT_P12_BASE64 != '' }}
+        if: ${{ env.HAS_CERT == 'true' }}
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -124,9 +127,9 @@ jobs:
             -exportPath build/export \
             -exportOptionsPlist /tmp/ExportOptions.plist
 
-      # ── Notarize — only when API key secrets are present ─────────────
+      # ── Notarize — only when API key + cert secrets are present ───────
       - name: Notarize
-        if: ${{ secrets.APPLE_API_KEY_P8_BASE64 != '' && secrets.BUILD_CERT_P12_BASE64 != '' }}
+        if: ${{ env.HAS_API_KEY == 'true' }}
         env:
           KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
@@ -144,7 +147,7 @@ jobs:
           rm /tmp/api_key.p8
 
       - name: Create DMG
-        if: ${{ secrets.BUILD_CERT_P12_BASE64 != '' }}
+        if: ${{ env.HAS_CERT == 'true' }}
         run: |
           mkdir -p release
           DMG_PATH="release/${APP_NAME}-${VERSION_TAG}.dmg"
@@ -153,7 +156,7 @@ jobs:
 
       # ── Sparkle sign — only when SPARKLE_PRIVATE_KEY is present ──────
       - name: Sign DMG with Sparkle
-        if: ${{ secrets.SPARKLE_PRIVATE_KEY != '' && env.DMG_PATH != '' }}
+        if: ${{ env.HAS_SPARKLE == 'true' && env.DMG_PATH != '' }}
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
@@ -185,7 +188,7 @@ jobs:
             echo "| Step | Status |"
             echo "|---|---|"
             echo "| Build | ${{ job.status }} |"
-            echo "| Codesign | ${{ secrets.BUILD_CERT_P12_BASE64 != '' && 'enabled' || 'SKIPPED (no cert)' }} |"
-            echo "| Notarize | ${{ secrets.APPLE_API_KEY_P8_BASE64 != '' && 'enabled' || 'SKIPPED (no .p8)' }} |"
-            echo "| Sparkle sign | ${{ secrets.SPARKLE_PRIVATE_KEY != '' && 'enabled' || 'SKIPPED (no key)' }} |"
+            echo "| Codesign | ${{ env.HAS_CERT == 'true' && 'enabled' || 'SKIPPED (no cert)' }} |"
+            echo "| Notarize | ${{ env.HAS_API_KEY == 'true' && 'enabled' || 'SKIPPED (no .p8)' }} |"
+            echo "| Sparkle sign | ${{ env.HAS_SPARKLE == 'true' && 'enabled' || 'SKIPPED (no key)' }} |"
           } >> "$GITHUB_STEP_SUMMARY"
