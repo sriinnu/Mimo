@@ -182,13 +182,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshStatusIcon(mood: .wincing)
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 260_000_000)
-            guard let self else { return }
-            // Re-check: popover may have opened or mismatch resolved mid-beat.
-            if self.popover?.isShown == true || !self.currentRepoState.hasMismatch {
-                self.refreshStatusIcon(mood: .normal)
-            } else {
-                self.refreshStatusIcon(mood: .normal)
-            }
+            // Return to resting eyes. reconcileWinceTimer decides whether the
+            // next beat fires; here we only end this one.
+            self?.refreshStatusIcon(mood: .normal)
         }
     }
 

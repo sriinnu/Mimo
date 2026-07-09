@@ -13,6 +13,7 @@ enum SSHKeyError: LocalizedError {
     case generationFailed(String)
     case deletionFailed(String)
     case importFailed(String)
+    case invalidFilename(String)
 
     var errorDescription: String? {
         switch self {
@@ -26,7 +27,57 @@ enum SSHKeyError: LocalizedError {
             return "SSH key deletion failed: \(detail)"
         case .importFailed(let detail):
             return "SSH key import failed: \(detail)"
+        case .invalidFilename(let name):
+            return "“\(name)” isn't a safe key filename — it's reserved, a dotfile, or escapes ~/.ssh."
         }
+    }
+}
+
+extension SSHKeyService {
+
+    /// Filenames Mimo must never overwrite — they hold SSH config/state, not
+    /// keys. Mirrors the `excludedFiles` set used by `scanKeys`.
+    static let reservedFilenames: Set<String> = [
+        "known_hosts", "known_hosts.old", "config", "authorized_keys",
+        "environment", "agent_sock"
+    ]
+
+    /// Reject filenames that would clobber reserved SSH files or escape
+    /// `~/.ssh`. Guards both import and generation. Visible to tests.
+    ///
+    /// Rules: no path separators, no `..` traversal, no leading dot, not in
+    /// the reserved set, not empty, and no control chars. The `.pub` suffix
+    /// is stripped before checking so a public-key sibling is validated the
+    /// same way as its private half.
+    static func sanitizeKeyFilename(_ raw: String) throws -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw SSHKeyError.invalidFilename(raw) }
+
+        // Strip a trailing .pub so import of a *.pub file validates cleanly.
+        let base = trimmed.hasSuffix(".pub")
+            ? String(trimmed.dropLast(4))
+            : trimmed
+
+        // No separators, no traversal — lastPathComponent is a hint, not a
+        // security boundary (it would happily keep "../x"), so we reject
+        // explicitly.
+        if base.contains("/") || base.contains("\\") || base.contains("\0") {
+            throw SSHKeyError.invalidFilename(raw)
+        }
+        if base.contains("..") {
+            throw SSHKeyError.invalidFilename(raw)
+        }
+        if base.hasPrefix(".") {
+            throw SSHKeyError.invalidFilename(raw)
+        }
+        if reservedFilenames.contains(base) || reservedFilenames.contains(base + ".pub") {
+            throw SSHKeyError.invalidFilename(raw)
+        }
+        // Reject whitespace/control chars — they don't belong in a key name.
+        if base.contains(where: { $0.isWhitespace || $0.isNewline }) {
+            throw SSHKeyError.invalidFilename(raw)
+        }
+        return trimmed
     }
 }
 
@@ -54,11 +105,10 @@ actor SSHKeyService {
         let contents = try fileManager.contentsOfDirectory(atPath: sshDir.path)
 
         // Find private keys (files without .pub extension, excluding known_hosts, config, etc.)
-        let excludedFiles: Set<String> = ["known_hosts", "known_hosts.old", "config", "authorized_keys", "environment", "agent_sock"]
         let privateKeys = contents.filter { filename in
             !filename.hasPrefix(".") &&
             !filename.hasSuffix(".pub") &&
-            !excludedFiles.contains(filename)
+            !Self.reservedFilenames.contains(filename)
         }
 
         var keys: [SSHKeyInfo] = []
@@ -112,7 +162,10 @@ actor SSHKeyService {
             try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: sshDir.path)
         }
 
-        let keyPath = sshDir.appendingPathComponent(filename).path
+        // Reject reserved/dotfile/traversal filenames before ssh-keygen writes
+        // somewhere it shouldn't (e.g. over ~/.ssh/config, or outside ~/.ssh).
+        let safeName = try Self.sanitizeKeyFilename(filename)
+        let keyPath = sshDir.appendingPathComponent(safeName).path
 
         var args = ["-t", type.rawValue]
         if let bits = type.defaultBits {
@@ -193,10 +246,19 @@ actor SSHKeyService {
 
     func importKey(from sourcePath: String) throws -> String {
         let filename = (sourcePath as NSString).lastPathComponent
-        let destPath = sshDirectoryURL.appendingPathComponent(filename).path
+        // Validate before copying — a source named `config` or `../x` must
+        // not clobber reserved files or escape ~/.ssh.
+        let safeName = try Self.sanitizeKeyFilename(filename)
+        let destPath = sshDirectoryURL.appendingPathComponent(safeName).path
 
         guard fileManager.fileExists(atPath: sourcePath) else {
             throw SSHKeyError.keyNotFound(sourcePath)
+        }
+
+        // Refuse to overwrite an existing key at the destination — importing
+        // silently over a different key is a footgun. Caller can delete first.
+        if fileManager.fileExists(atPath: destPath) {
+            throw SSHKeyError.importFailed("a key named \(safeName) already exists in ~/.ssh")
         }
 
         do {

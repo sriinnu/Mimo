@@ -50,12 +50,28 @@ let project = Project(
                 ]
             )
         ),
+        .target(
+            name: "MimoTests",
+            destinations: .macOS,
+            product: .unitTests,
+            bundleId: "com.sriinnu.MimoTests",
+            deploymentTargets: .macOS("13.0"),
+            infoPlist: .default,
+            sources: ["Tests/MimoTests/**"],
+            dependencies: [
+                .target(name: "Mimo")
+            ]
+        ),
     ],
     schemes: [
         .scheme(
             name: "Mimo",
             shared: true,
             buildAction: .buildAction(targets: ["Mimo"]),
+            testAction: .targets(
+                ["MimoTests"],
+                configuration: "Debug"
+            ),
             runAction: .runAction(
                 configuration: "Debug",
                 executable: "Mimo"

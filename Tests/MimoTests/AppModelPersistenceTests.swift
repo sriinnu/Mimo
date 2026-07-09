@@ -2,8 +2,9 @@
 //  AppModelPersistenceTests.swift
 //  MimoTests
 //
-//  Tests for AppModel profile CRUD and UserDefaults persistence.
-//  Uses a test-specific UserDefaults suite to avoid polluting real data.
+//  Tests for AppModel profile CRUD and file persistence. Uses an isolated
+//  temp config dir so the developer's real ~/.config/mimo/profiles.json is
+//  never touched.
 //
 
 import XCTest
@@ -11,6 +12,22 @@ import XCTest
 
 @MainActor
 final class AppModelPersistenceTests: XCTestCase {
+
+    private var configDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        configDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimo-tests-\(UUID().uuidString)")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: configDir)
+        configDir = nil
+        super.tearDown()
+    }
+
+    private func makeModel() -> AppModel { AppModel(configDir: configDir) }
 
     // MARK: - Profile encode/decode round-trip
 
@@ -43,10 +60,25 @@ final class AppModelPersistenceTests: XCTestCase {
         XCTAssertEqual(decoded[1].name, "Personal")
     }
 
+    // MARK: - Persistence survives a fresh AppModel (file-backed)
+
+    func testProfilesPersistAcrossInstances() {
+        let first = makeModel()
+        let profile = GitProfile(name: "Work", userName: "W", userEmail: "w@w.com")
+        first.addOrUpdateProfile(profile)
+
+        // A second model pointing at the same dir should load the saved profile.
+        let second = makeModel()
+        second.loadSavedProfiles()
+
+        XCTAssertEqual(second.availableProfiles.count, 1)
+        XCTAssertEqual(second.availableProfiles.first?.id, profile.id)
+    }
+
     // MARK: - AppModel addOrUpdateProfile adds new profile
 
     func testAddProfile() {
-        let appModel = AppModel()
+        let appModel = makeModel()
         let profile = GitProfile(name: "New", userName: "N", userEmail: "n@n.com")
 
         appModel.addOrUpdateProfile(profile)
@@ -59,7 +91,7 @@ final class AppModelPersistenceTests: XCTestCase {
 
     func testUpdateExistingProfile() {
         let profile = GitProfile(name: "Work", userName: "Old", userEmail: "old@w.com")
-        let appModel = AppModel()
+        let appModel = makeModel()
         appModel.addOrUpdateProfile(profile)
 
         var updated = profile
@@ -74,7 +106,7 @@ final class AppModelPersistenceTests: XCTestCase {
 
     func testDeleteProfile() {
         let profile = GitProfile(name: "Work", userName: "W", userEmail: "w@w.com")
-        let appModel = AppModel()
+        let appModel = makeModel()
         appModel.addOrUpdateProfile(profile)
 
         appModel.deleteProfile(id: profile.id)
@@ -86,7 +118,7 @@ final class AppModelPersistenceTests: XCTestCase {
 
     func testDeleteActiveProfileClearsActiveID() {
         let profile = GitProfile(name: "Work", userName: "W", userEmail: "w@w.com")
-        let appModel = AppModel()
+        let appModel = makeModel()
         appModel.addOrUpdateProfile(profile)
         appModel.activeProfileID = profile.id
 
@@ -98,7 +130,7 @@ final class AppModelPersistenceTests: XCTestCase {
     // MARK: - Empty state starts with no profiles
 
     func testEmptyState() {
-        let appModel = AppModel()
+        let appModel = makeModel()
         XCTAssertTrue(appModel.availableProfiles.isEmpty)
         XCTAssertNil(appModel.activeProfileID)
     }
@@ -108,7 +140,7 @@ final class AppModelPersistenceTests: XCTestCase {
     func testActiveProfileReturnsCorrectProfile() {
         let p1 = GitProfile(name: "Work", userName: "W", userEmail: "w@w.com")
         let p2 = GitProfile(name: "Home", userName: "H", userEmail: "h@h.com")
-        let appModel = AppModel()
+        let appModel = makeModel()
         appModel.addOrUpdateProfile(p1)
         appModel.addOrUpdateProfile(p2)
         appModel.activeProfileID = p2.id

@@ -3,26 +3,58 @@
 //  Mimo
 //
 //  File I/O layer extracted from IdentityAuditLog.swift.
-//  All disk operations are nonisolated static methods designed to run on
-//  Task.detached — they never reach back into main-actor instance state.
+//  Every mutation of the on-disk log goes through `AuditLogWriter` — a serial
+//  actor — so appends, caps, reverts-flagging, and deletes can never
+//  interleave and corrupt the file. The pure transforms (`readAll`,
+//  `rewriteCapped`) are nonisolated statics the actor calls inline; because
+//  they're synchronous, they run *on* the actor and are serialized by it.
 //
 
 import Foundation
 
 // MARK: - Serial write actor
 
-/// Serializes all audit-log file I/O so concurrent writes never interleave.
-/// Each `write(entry:cap:)` call fully persists and reloads before the next
-/// one begins, eliminating the race where a reload can miss a prior write.
+/// Single serialization point for all audit-log file I/O. Every mutation —
+/// append, cap-rewrite, flag-as-reverted, delete — enters here, so nothing
+/// races. The previous design let `flagAsReverted`/`deleteFromLog` read+rewrite
+/// the file outside this actor, racing concurrent appends.
 actor AuditLogWriter {
     static let shared = AuditLogWriter()
 
     func write(entry: AuditEntry, cap: Int) async {
-        await IdentityAuditLog.persist(entry: entry, cap: cap)
+        IdentityAuditLog.persist(entry: entry, cap: cap)
         let loaded = IdentityAuditLog.readAll(cap: cap)
         await MainActor.run {
             IdentityAuditLog.shared.entries = loaded
         }
+    }
+
+    /// Mark one entry reverted on disk, then republish. Serialized so it
+    /// can't race an in-flight append.
+    func flag(id: UUID, cap: Int) async {
+        let all = IdentityAuditLog.readAll(cap: Int.max)
+        var didChange = false
+        let updated = all.map { entry -> AuditEntry in
+            if entry.id == id, !entry.isReverted {
+                didChange = true
+                return entry.flaggedReverted()
+            }
+            return entry
+        }
+        guard didChange else { return }
+        try? IdentityAuditLog.rewriteCapped(all: updated, cap: cap, paths: AuditPaths.resolve())
+        let loaded = IdentityAuditLog.readAll(cap: cap)
+        await MainActor.run { IdentityAuditLog.shared.entries = loaded }
+    }
+
+    /// Remove one entry from disk, then republish. Serialized.
+    func delete(id: UUID, cap: Int) async {
+        let all = IdentityAuditLog.readAll(cap: Int.max)
+        let filtered = all.filter { $0.id != id }
+        guard filtered.count != all.count else { return }
+        try? IdentityAuditLog.rewriteCapped(all: filtered, cap: cap, paths: AuditPaths.resolve())
+        let loaded = IdentityAuditLog.readAll(cap: cap)
+        await MainActor.run { IdentityAuditLog.shared.entries = loaded }
     }
 }
 
@@ -48,7 +80,11 @@ extension IdentityAuditLog {
 
 extension IdentityAuditLog {
 
-    nonisolated static func persist(entry: AuditEntry, cap: Int) async {
+    /// Append one entry, then cap to the most-recent `cap`. Synchronous so it
+    /// runs on (and is serialized by) `AuditLogWriter`. Failure is swallowed
+    /// (printed) so a disk error never blocks the git/ssh write that just
+    /// succeeded — the caller already committed the real change.
+    nonisolated static func persist(entry: AuditEntry, cap: Int) {
         let paths = AuditPaths.resolve()
         let fm = FileManager.default
 
@@ -111,8 +147,10 @@ extension IdentityAuditLog {
     }
 
     /// Atomically rewrite the log keeping only the most recent N entries.
+    /// `all` is expected most-recent-first (as `readAll` returns it).
     nonisolated static func rewriteCapped(all: [AuditEntry], cap: Int, paths: AuditPaths) throws {
         let kept = Array(all.prefix(cap))
+        // Oldest-first for the on-disk append log.
         let ordered = Array(kept.reversed())
         var buf = ""
         for e in ordered {
@@ -128,43 +166,26 @@ extension IdentityAuditLog {
             ofItemAtPath: paths.logURL.path
         )
     }
+}
 
-    /// Rewrite the log marking a specific entry's `isReverted = true`.
-    nonisolated static func flagAsReverted(id: UUID, cap: Int) {
-        let paths = AuditPaths.resolve()
-        let all = readAll(cap: Int.max)
-        var didChange = false
-        let updated: [AuditEntry] = all.map { entry in
-            if entry.id == id, !entry.isReverted {
-                didChange = true
-                return AuditEntry(
-                    id: entry.id,
-                    timestamp: entry.timestamp,
-                    profileID: entry.profileID,
-                    profileName: entry.profileName,
-                    scope: entry.scope,
-                    path: entry.path,
-                    summary: entry.summary,
-                    before: entry.before,
-                    after: entry.after,
-                    isReverted: true,
-                    configKey: entry.configKey
-                )
-            }
-            return entry
-        }
-        guard didChange else { return }
-        try? rewriteCapped(all: updated, cap: cap, paths: paths)
-    }
+// MARK: - AuditEntry transform
 
-    /// Rewrite the log without a specific entry. Deleting an entry only
-    /// erases the timeline record — the underlying config change Mimo
-    /// already made stays. The caller is responsible for confirming.
-    nonisolated static func deleteFromLog(id: UUID, cap: Int) {
-        let paths = AuditPaths.resolve()
-        let all = readAll(cap: Int.max)
-        let filtered = all.filter { $0.id != id }
-        guard filtered.count != all.count else { return }
-        try? rewriteCapped(all: filtered, cap: cap, paths: paths)
+extension AuditEntry {
+    /// Copy with `isReverted = true`. Avoids re-spelling all 11 fields at
+    /// every call site.
+    func flaggedReverted() -> AuditEntry {
+        AuditEntry(
+            id: id,
+            timestamp: timestamp,
+            profileID: profileID,
+            profileName: profileName,
+            scope: scope,
+            path: path,
+            summary: summary,
+            before: before,
+            after: after,
+            isReverted: true,
+            configKey: configKey
+        )
     }
 }

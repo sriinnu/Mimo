@@ -45,6 +45,21 @@ final class AppModel: ObservableObject {
 
     private let firstRunSeenKey = "com.sriinnu.mimo.firstRunSeen"
 
+    // MARK: - Storage root
+    //
+    // Overridable so tests can point persistence at a temp dir instead of
+    // clobbering the developer's real ~/.config/mimo/profiles.json. Defaults
+    // to the real location for production.
+    private let secureConfigDirURL: URL
+
+    /// - parameter configDir: where profile/directory JSON is stored. Tests
+    ///   pass a throwaway directory; production leaves it nil for the default.
+    init(configDir: URL? = nil) {
+        self.secureConfigDirURL = configDir
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".config/mimo")
+    }
+
     // MARK: - Services
 
     private let gitConfig = GitConfigService()
@@ -285,40 +300,83 @@ final class AppModel: ObservableObject {
     }
 
     private func saveProfiles() {
-        if let data = try? JSONEncoder().encode(availableProfiles) {
-            UserDefaults.standard.set(
-                data,
-                forKey: Constants.Persistence.profilesKey
-            )
-        }
+        writeSecureJSON(availableProfiles, to: "profiles.json")
     }
 
-    private func loadSavedProfiles() {
-        guard
-            let data = UserDefaults.standard.data(
-                forKey: Constants.Persistence.profilesKey
-            ),
-            let profiles = try? JSONDecoder().decode(
-                [GitProfile].self,
-                from: data
-            )
-        else {
-            return
+    /// Reloads profiles from disk. Internal so tests can verify file-backed
+    /// round-trips across fresh AppModel instances.
+    func loadSavedProfiles() {
+        if let profiles = readSecureJSON(
+            [GitProfile].self,
+            from: "profiles.json",
+            legacyKey: Constants.Persistence.profilesKey
+        ) {
+            availableProfiles = profiles
         }
-        availableProfiles = profiles
     }
 
     private func saveDirectoryProfiles() {
-        if let data = try? JSONEncoder().encode(directoryProfiles) {
-            UserDefaults.standard.set(data, forKey: Constants.Persistence.directoriesKey)
-        }
+        writeSecureJSON(directoryProfiles, to: "directories.json")
     }
 
     private func loadSavedDirectoryProfiles() {
-        guard
-            let data = UserDefaults.standard.data(forKey: Constants.Persistence.directoriesKey),
-            let dirs = try? JSONDecoder().decode([DirectoryProfile].self, from: data)
-        else { return }
-        directoryProfiles = dirs
+        if let dirs = readSecureJSON(
+            [DirectoryProfile].self,
+            from: "directories.json",
+            legacyKey: Constants.Persistence.directoriesKey
+        ) {
+            directoryProfiles = dirs
+        }
+    }
+
+    // MARK: - Secure persistence helpers
+    //
+    // Profiles carry emails, GPG key ids, SSH key paths, and provider URLs —
+    // identity metadata. That belongs in a mode-0600 file under ~/.config/mimo
+    // (where the audit log already lives), not the world-readable UserDefaults
+    // plist. On first read after this change, legacy UserDefaults data is
+    // migrated to the file; the file wins on every subsequent load.
+
+    private var secureConfigDir: URL {
+        secureConfigDirURL
+    }
+
+    private func writeSecureJSON<T: Encodable>(_ value: T, to filename: String) {
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(
+                at: secureConfigDir,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            let url = secureConfigDir.appendingPathComponent(filename)
+            let data = try JSONEncoder().encode(value)
+            try data.write(to: url, options: [.atomic])
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            print("[AppModel] failed to persist \(filename): \(error.localizedDescription)")
+        }
+    }
+
+    private func readSecureJSON<T: Codable>(
+        _ type: T.Type,
+        from filename: String,
+        legacyKey: String
+    ) -> T? {
+        let url = secureConfigDir.appendingPathComponent(filename)
+        if let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode(type, from: data) {
+            return decoded
+        }
+        // Legacy fallback — older builds kept profiles in UserDefaults. Migrate
+        // to the 0600 file on first hit. We leave the legacy key in place; the
+        // file takes precedence from here on, so a stale plist is harmless and
+        // wiping it on a failed write could lose data.
+        if let data = UserDefaults.standard.data(forKey: legacyKey),
+           let decoded = try? JSONDecoder().decode(type, from: data) {
+            writeSecureJSON(decoded, to: filename)
+            return decoded
+        }
+        return nil
     }
 }

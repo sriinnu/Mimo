@@ -3,8 +3,9 @@
 # ============================================================================
 #
 # Runs on every push to a feature branch and every PR to main.
-# Debug build, no codesigning, no secrets needed.
-# Catches Project.swift parse breaks, Swift compile errors, missing files.
+# Debug build + unit tests, no codesigning, no secrets needed.
+# Catches Project.swift parse breaks, Swift compile errors, missing files,
+# and — now that the MimoTests target is wired in — test regressions.
 #
 # ============================================================================
 
@@ -47,6 +48,16 @@ jobs:
       - name: Build (Debug, unsigned)
         run: |
           xcodebuild build \
+            -workspace Mimo.xcworkspace \
+            -scheme Mimo \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Test (Debug, unsigned)
+        run: |
+          xcodebuild test \
             -workspace Mimo.xcworkspace \
             -scheme Mimo \
             -configuration Debug \
