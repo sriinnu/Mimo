@@ -154,30 +154,38 @@ jobs:
           hdiutil create -volname "$APP_NAME" -srcfolder build/export/Mimo.app -ov -format UDZO "$DMG_PATH"
           echo "DMG_PATH=$DMG_PATH" >> "$GITHUB_ENV"
 
-      # ── Sparkle sign — only when SPARKLE_PRIVATE_KEY is present ──────
-      - name: Sign DMG with Sparkle
-        if: ${{ env.HAS_SPARKLE == 'true' && env.DMG_PATH != '' }}
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          # Find sign_update inside the resolved Sparkle artifact.
-          SIGN_UPDATE=$(find ~/Library/Developer/Xcode/DerivedData -name "sign_update" -type f -perm +111 2>/dev/null | head -1)
-          if [ -z "$SIGN_UPDATE" ]; then
-            SIGN_UPDATE=$(find . -name "sign_update" -type f -perm +111 2>/dev/null | head -1)
-          fi
-          test -x "$SIGN_UPDATE" || { echo "sign_update not found"; exit 1; }
-          echo "$SPARKLE_PRIVATE_KEY" > /tmp/sparkle_priv
-          chmod 600 /tmp/sparkle_priv
-          SIGNATURE=$("$SIGN_UPDATE" -f /tmp/sparkle_priv "$DMG_PATH")
-          rm /tmp/sparkle_priv
-          echo "SPARKLE_SIGNATURE=$SIGNATURE" >> "$GITHUB_ENV"
-
       - name: Upload DMG to release
         if: ${{ env.DMG_PATH != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$VERSION_TAG" "$DMG_PATH" --clobber
+
+      # ── Sparkle sign — best-effort. The DMG is already notarized + uploaded
+      # above; this computes the EdDSA signature for Sparkle's appcast so
+      # installed copies can auto-update. continue-on-error because a missing
+      # signature only breaks auto-update, not the downloadable notarized DMG.
+      - name: Sign DMG with Sparkle
+        if: ${{ env.HAS_SPARKLE == 'true' && env.DMG_PATH != '' }}
+        continue-on-error: true
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          # Locate Sparkle's sign_update in the resolved framework. Avoid
+          # `-perm +111` (deprecated/erratic on the macOS runner) — filter by
+          # executability with test -x instead.
+          SIGN_UPDATE=""
+          while IFS= read -r -d '' f; do
+            if [ -x "$f" ]; then SIGN_UPDATE="$f"; break; fi
+          done < <(find "$HOME/Library/Developer/Xcode/DerivedData" . -name sign_update -type f -print0 2>/dev/null)
+          if [ -z "$SIGN_UPDATE" ]; then echo "::error::sign_update binary not found"; exit 1; fi
+          echo "$SPARKLE_PRIVATE_KEY" > /tmp/sparkle_priv
+          chmod 600 /tmp/sparkle_priv
+          SIGNATURE=$("$SIGN_UPDATE" -f /tmp/sparkle_priv "$DMG_PATH" 2>&1) || {
+            echo "::error::sign_update failed: $SIGNATURE"; rm -f /tmp/sparkle_priv; exit 1;
+          }
+          rm -f /tmp/sparkle_priv
+          echo "SPARKLE_SIGNATURE=$SIGNATURE" >> "$GITHUB_ENV"
 
       - name: Summary
         if: always()
