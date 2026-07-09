@@ -20,18 +20,15 @@ actor ProviderConfigService {
     func applyProviderConfig(_ profile: GitProfile, provider: GitProvider) async throws {
         guard provider != .custom else { return }
 
+        // Rewrite HTTPS provider URLs to SSH so the per-profile SSH key is
+        // used. `core.sshCommand` is owned by GitConfigService.applyProfile —
+        // writing it here too was a redundant double-write.
         let httpsPrefix = provider.httpsURLPrefix
         let sshPrefix = provider.sshURLPrefix
 
         if !httpsPrefix.isEmpty {
             let key = "url.\(sshPrefix).insteadOf"
             try await auditedSet(key: key, value: httpsPrefix, profile: profile)
-        }
-
-        if let sshKeyPath = profile.sshKeyPath, !sshKeyPath.isEmpty {
-            let expandedPath = (sshKeyPath as NSString).expandingTildeInPath
-            let sshCommand = "ssh -i \(expandedPath)"
-            try await auditedSet(key: "core.sshCommand", value: sshCommand, profile: profile)
         }
     }
 
@@ -42,10 +39,6 @@ actor ProviderConfigService {
         if !sshPrefix.isEmpty {
             let key = "url.\(sshPrefix).insteadOf"
             try await auditedUnset(key: key, profile: profile)
-        }
-
-        if let sshKeyPath = profile.sshKeyPath, !sshKeyPath.isEmpty {
-            try await auditedUnset(key: "core.sshCommand", profile: profile)
         }
     }
 

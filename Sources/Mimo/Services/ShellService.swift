@@ -25,55 +25,86 @@ actor ShellService {
 
     /// Execute a shell command and return trimmed stdout.
     func run(_ command: String, arguments: [String] = []) async throws -> String {
-        let process = Process()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = [command] + arguments
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-        let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        guard process.terminationStatus == 0 else {
-            throw ShellError.executionFailed(errorOutput.isEmpty ? "Exit code \(process.terminationStatus)" : errorOutput)
+        let (output, errorOutput, status) = try await Self.capture(
+            executable: "/usr/bin/env",
+            arguments: [command] + arguments,
+            environment: nil
+        )
+        guard status == 0 else {
+            throw ShellError.executionFailed(errorOutput.isEmpty ? "Exit code \(status)" : errorOutput)
         }
-
         return output
     }
 
-    /// Execute a shell command using /bin/sh -c for piped/complex commands.
-    func runShell(_ command: String) async throws -> String {
+    /// Shared, deadlock-free process runner.
+    ///
+    /// Pipes are drained concurrently with `waitUntilExit` — otherwise a
+    /// command that emits more than the pipe buffer (~64KB) blocks forever
+    /// on write while we wait for it to exit. `git clone` and
+    /// `git status --porcelain` on big repos both hit this.
+    nonisolated static func capture(
+        executable: String,
+        arguments: [String],
+        environment: [String: String]?
+    ) async throws -> (output: String, errorOutput: String, status: Int32) {
+
         let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
         let outputPipe = Pipe()
         let errorPipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
         process.standardOutput = outputPipe
         process.standardError = errorPipe
+        if let environment { process.environment = environment }
+
+        // Start draining each pipe on a background thread BEFORE waiting.
+        // `readDataToEndOfFile` blocks until the write end closes (process
+        // exit), so it must run off-thread and in parallel with
+        // `waitUntilExit` — a full pipe otherwise deadlocks the process.
+        let outReader = PipeReader(outputPipe)
+        let errReader = PipeReader(errorPipe)
+        outReader.start()
+        errReader.start()
 
         try process.run()
+
         process.waitUntilExit()
+        let outData = outReader.wait()
+        let errData = errReader.wait()
 
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: outData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let errorOutput = String(data: errData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (output, errorOutput, process.terminationStatus)
+    }
+}
 
-        let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let errorOutput = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+/// Reads a pipe to EOF on a background thread and hands the bytes back via a
+/// semaphore. Foundation's `Thread` has no join, so we wait on the semaphore.
+final class PipeReader: @unchecked Sendable {
+    private let pipe: Pipe
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var data = Data()
+    private let lock = NSLock()
 
-        guard process.terminationStatus == 0 else {
-            throw ShellError.executionFailed(errorOutput.isEmpty ? "Exit code \(process.terminationStatus)" : errorOutput)
+    init(_ pipe: Pipe) { self.pipe = pipe }
+
+    func start() {
+        let thread = Thread { [weak self] in
+            guard let self else { return }
+            let d = self.pipe.fileHandleForReading.readDataToEndOfFile()
+            self.lock.lock(); self.data = d; self.lock.unlock()
+            self.semaphore.signal()
         }
+        thread.qualityOfService = .utility
+        thread.start()
+    }
 
-        return output
+    func wait() -> Data {
+        semaphore.wait()
+        lock.lock(); defer { lock.unlock() }
+        return data
     }
 }

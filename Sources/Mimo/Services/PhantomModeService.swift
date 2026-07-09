@@ -80,7 +80,9 @@ final class PhantomModeService: ObservableObject {
 
         self.appModel = appModel
         self.capturedRepoRoot = repoRoot
-        self.capturedHeadSHA = repoRoot.flatMap { Self.headSHA(in: $0) }
+        var initialSHA: String?
+        if let repoRoot { initialSHA = await Self.headSHA(in: repoRoot) }
+        self.capturedHeadSHA = initialSHA
         let started = Date()
         self.startDate = started
 
@@ -181,7 +183,7 @@ final class PhantomModeService: ObservableObject {
             // No repo captured → time-only mode; nothing more to do this tick.
             guard let repoRoot = capturedRepoRoot else { continue }
 
-            let current = Self.headSHA(in: repoRoot)
+            let current = await Self.headSHA(in: repoRoot)
             // If the captured SHA was nil (e.g. a freshly-initialized repo
             // with no commits) and we now have a SHA, that *is* a change.
             if current != capturedHeadSHA {
@@ -224,27 +226,17 @@ final class PhantomModeService: ObservableObject {
 
     // MARK: Git HEAD probe
 
-    /// Synchronous, blocking probe — runs `git -C <repo> rev-parse HEAD`.
-    /// Returns nil for empty repos / errors. We don't reuse ShellService
-    /// because that's an actor and this is called from a non-isolated
-    /// context inside the poll loop; a direct Process keeps things simple.
-    nonisolated static func headSHA(in repoRoot: URL) -> String? {
-        let process = Process()
-        let outPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-C", repoRoot.path, "rev-parse", "HEAD"]
-        process.standardOutput = outPipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        let data = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let s = String(data: data, encoding: .utf8) ?? ""
-        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+    /// `git -C <repo> rev-parse HEAD`, run off the main thread. Returns nil
+    /// for empty repos / errors. Routed through `ShellService.capture` so the
+    /// blocking happens on a background executor — not the main actor, which
+    /// this service otherwise runs on.
+    nonisolated static func headSHA(in repoRoot: URL) async -> String? {
+        let result = try? await ShellService.capture(
+            executable: "/usr/bin/env",
+            arguments: ["git", "-C", repoRoot.path, "rev-parse", "HEAD"],
+            environment: nil
+        )
+        guard let result, result.status == 0, !result.output.isEmpty else { return nil }
+        return result.output
     }
 }

@@ -3,9 +3,11 @@
 //  Mimo
 //
 //  Revert engine — undoes a single audit entry by replaying the `before`
-//  value back to disk. Every revert itself is audited so the user can see
-//  the undo in the time machine (but reverts of reverts are not undoable
-//  from the UI — `isReverted` gates the button).
+//  value back to disk. Conflict-aware: if the live value no longer matches
+//  what Mimo wrote (`entry.after`), something changed it since, and we
+//  refuse rather than clobber the user's current state. Every revert is
+//  itself audited so the undo shows in the time machine (reverts of reverts
+//  aren't re-undoable from the UI — `isReverted` gates the button).
 //
 
 import Foundation
@@ -14,8 +16,9 @@ extension IdentityAuditLog {
 
     /// Undo a single audit entry.
     ///
-    /// Throws on disk / git failures so the view can surface the error.
-    /// The entry is flagged as reverted only after the write succeeds.
+    /// Throws `RevertError.conflict` when the live value has drifted from
+    /// `entry.after` — restoring `before` then would silently overwrite an
+    /// unrelated later change, which is worse than asking the user to look.
     func revert(_ entry: AuditEntry) async throws {
         guard !entry.isReverted else { return }
 
@@ -42,24 +45,13 @@ extension IdentityAuditLog {
             )
         }
 
-        // Flag the original entry as reverted on disk.
-        Self.flagAsReverted(id: entry.id, cap: maxEntries)
+        // Flag the original entry reverted — through the writer actor so it
+        // can't race an in-flight append.
+        await AuditLogWriter.shared.flag(id: entry.id, cap: maxEntries)
 
         // In-memory mirror — update so the UI reflects the change immediately.
         if let idx = entries.firstIndex(where: { $0.id == entry.id }) {
-            entries[idx] = AuditEntry(
-                id: entry.id,
-                timestamp: entry.timestamp,
-                profileID: entry.profileID,
-                profileName: entry.profileName,
-                scope: entry.scope,
-                path: entry.path,
-                summary: entry.summary,
-                before: entry.before,
-                after: entry.after,
-                isReverted: true,
-                configKey: entry.configKey
-            )
+            entries[idx] = entry.flaggedReverted()
         }
 
         // Audit the revert itself.
@@ -83,6 +75,18 @@ extension IdentityAuditLog {
         let shell = ShellService()
         guard !entry.configKey.isEmpty else { return }
 
+        // Conflict guard: only undo if the live value is still what this
+        // entry left it. If it drifted (manual edit, another switch, another
+        // tool), refuse rather than clobber.
+        let current = try? await shell.run("git", arguments: ["config", "--global", entry.configKey])
+        if current != entry.after {
+            throw RevertError.conflict(
+                "\(entry.configKey) has changed since this write. "
+                + "Live value is \(current ?? "<unset>"); this entry set it to \(entry.after ?? "<unset>"). "
+                + "Update it manually if you still want to revert."
+            )
+        }
+
         if let before = entry.before {
             _ = try await shell.run(
                 "git", arguments: ["config", "--global", entry.configKey, before]
@@ -97,6 +101,16 @@ extension IdentityAuditLog {
     private func revertGitConfigRepo(_ entry: AuditEntry, path: String) async throws {
         let shell = ShellService()
         guard !entry.configKey.isEmpty else { return }
+
+        // Same conflict guard, repo-local.
+        let current = try? await shell.run(
+            "git", arguments: ["config", "-f", path, entry.configKey]
+        )
+        if current != entry.after {
+            throw RevertError.conflict(
+                "\(entry.configKey) in \(path) has changed since this write."
+            )
+        }
 
         if let before = entry.before {
             _ = try await shell.run(
@@ -113,8 +127,9 @@ extension IdentityAuditLog {
 
     private func revertSSHConfig(_ entry: AuditEntry) async throws {
         // SSH entries snapshot the whole file. Restoring means writing the
-        // `before` content back verbatim — the same strategy the SSH config
-        // service uses for its own block-level ops, just at file granularity.
+        // `before` content back verbatim — but ONLY if the live file still
+        // matches `after`. If the user (or Mimo) edited ~/.ssh/config since,
+        // a verbatim restore would nuke those edits, so we refuse.
         guard let before = entry.before else {
             throw RevertError.missingSnapshot
         }
@@ -123,6 +138,17 @@ extension IdentityAuditLog {
             .appendingPathComponent(".ssh/config")
 
         let fm = FileManager.default
+        let live = fm.fileExists(atPath: sshConfigURL.path)
+            ? (try? String(contentsOfFile: sshConfigURL.path, encoding: .utf8))
+            : nil
+
+        if live != entry.after {
+            throw RevertError.conflict(
+                "~/.ssh/config has changed since this entry was written. "
+                + "Restoring the snapshot would overwrite those edits — edit the file manually instead."
+            )
+        }
+
         if !fm.fileExists(atPath: sshConfigURL.deletingLastPathComponent().path) {
             try fm.createDirectory(
                 at: sshConfigURL.deletingLastPathComponent(),
@@ -144,12 +170,15 @@ extension IdentityAuditLog {
 enum RevertError: LocalizedError {
     case notSupported(String)
     case missingSnapshot
+    case conflict(String)
 
     var errorDescription: String? {
         switch self {
         case .notSupported(let msg): return msg
         case .missingSnapshot:
             return "The before-state snapshot is missing — can't restore SSH config."
+        case .conflict(let msg):
+            return "Can't revert safely: \(msg)"
         }
     }
 }

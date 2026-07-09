@@ -2,9 +2,10 @@
 //  PhantomModeServiceTests.swift
 //  MimoTests
 //
-//  Tests for phantom mode state transitions. PhantomModeService is
-//  @MainActor with a private init (singleton), so we use .shared
-//  and clean up state in tearDown.
+//  Tests for phantom mode state transitions. PhantomModeService is @MainActor
+//  with a private init (singleton), so we use .shared. The phantom *state*
+//  (phantomReturnToID / phantomStartedAt) lives on AppModel — the service
+//  only drives it — so assertions read from appModel.
 //
 
 import XCTest
@@ -15,79 +16,70 @@ final class PhantomModeServiceTests: XCTestCase {
 
     private var service: PhantomModeService { .shared }
 
-    override func tearDown() {
-        let appModel = AppModel()
-        service.clearOnLaunch(appModel: appModel)
+    private func makeModel() -> AppModel {
+        AppModel(configDir: FileManager.default.temporaryDirectory
+            .appendingPathComponent("mimo-phantom-\(UUID().uuidString)"))
     }
 
     // MARK: - clearOnLaunch resets all state
 
     func testClearOnLaunchResetsState() {
-        service.phantomReturnToID = UUID()
-        service.phantomStartedAt = Date()
+        let appModel = makeModel()
+        appModel.phantomReturnToID = UUID()
+        appModel.phantomStartedAt = Date()
 
-        let appModel = AppModel()
         service.clearOnLaunch(appModel: appModel)
 
-        XCTAssertNil(service.phantomReturnToID)
-        XCTAssertNil(service.phantomStartedAt)
+        XCTAssertNil(appModel.phantomReturnToID)
+        XCTAssertNil(appModel.phantomStartedAt)
     }
 
     // MARK: - clearOnLaunch cancels poll task
 
     func testClearOnLaunchCancelsPollTask() {
-        let appModel = AppModel()
+        let appModel = makeModel()
         service.clearOnLaunch(appModel: appModel)
         XCTAssertFalse(service.isActive)
     }
 
-    // MARK: - cancel clears return-to state
+    // MARK: - cancel clears return-to state (no matching profile → no switch)
 
     func testCancelClearsPhantomState() {
-        service.phantomReturnToID = UUID()
-        service.phantomStartedAt = Date()
+        let appModel = makeModel()
+        appModel.phantomReturnToID = UUID()
+        appModel.phantomStartedAt = Date()
 
-        let appModel = AppModel()
         service.cancel(appModel: appModel)
 
-        XCTAssertNil(service.phantomReturnToID)
-        XCTAssertNil(service.phantomStartedAt)
+        XCTAssertNil(appModel.phantomReturnToID)
+        XCTAssertNil(appModel.phantomStartedAt)
     }
 
-    // MARK: - cancel with matching profile triggers revert
+    // MARK: - cancel with matching profile triggers a real git switch
+    //
+    // Skipped in unit tests: switchProfile writes to the real ~/.gitconfig.
+    // Cover via an integration harness with an injectable GitConfigService.
 
-    func testCancelWithReturnProfileTriggersSwitch() async {
-        let returnID = UUID()
-        let returnProfile = GitProfile(id: returnID, name: "Original",
-                                        userName: "O", userEmail: "o@o.com")
-        service.phantomReturnToID = returnID
-        service.phantomStartedAt = Date()
-
-        let appModel = AppModel()
-        appModel.addOrUpdateProfile(returnProfile)
-        service.cancel(appModel: appModel)
-
-        // Give the dispatched Task a moment to run
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        XCTAssertNil(service.phantomReturnToID)
+    func testCancelWithReturnProfileTriggersSwitch() throws {
+        throw XCTSkip("requires real git-config writes; cover via integration harness")
     }
 
     // MARK: - cancel with no matching profile is safe
 
     func testCancelWithMissingProfileIsSafe() {
-        service.phantomReturnToID = UUID() // non-existent
-        service.phantomStartedAt = Date()
+        let appModel = makeModel()
+        appModel.phantomReturnToID = UUID() // non-existent
+        appModel.phantomStartedAt = Date()
 
-        let appModel = AppModel()
         service.cancel(appModel: appModel)
 
-        XCTAssertNil(service.phantomReturnToID)
+        XCTAssertNil(appModel.phantomReturnToID)
     }
 
     // MARK: - isActive false after clear
 
     func testIsActiveFalseAfterClear() {
-        let appModel = AppModel()
+        let appModel = makeModel()
         service.clearOnLaunch(appModel: appModel)
         XCTAssertFalse(service.isActive)
     }
@@ -95,9 +87,9 @@ final class PhantomModeServiceTests: XCTestCase {
     // MARK: - phantomStartedAt is nil after cancel
 
     func testPhantomStartedAtCleared() {
-        service.phantomStartedAt = Date()
-        let appModel = AppModel()
+        let appModel = makeModel()
+        appModel.phantomStartedAt = Date()
         service.cancel(appModel: appModel)
-        XCTAssertNil(service.phantomStartedAt)
+        XCTAssertNil(appModel.phantomStartedAt)
     }
 }

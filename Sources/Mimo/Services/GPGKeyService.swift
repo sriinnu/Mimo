@@ -2,7 +2,7 @@
 //  GPGKeyService.swift
 //  Mimo
 //
-//  Created by Srinivas Pendela on 27/04/2026.
+//  Created by Srinivas Pendela on 27/04/2026
 //
 
 import Foundation
@@ -18,10 +18,23 @@ actor GPGKeyService {
 
     private let shell = ShellService()
 
+    /// List secret keys via gpg's machine-readable colon format.
+    ///
+    /// We use `--with-colons` because the human-readable format drifts across
+    /// GPG versions (the 40-char fingerprint moved off the `sec` line in
+    /// 2.2+), which broke the old "find a ≥40-hex token on the sec line"
+    /// parser. Colon records are stable: `sec:...:KEYID:...`, the following
+    /// `fpr:` line carries the fingerprint, and `uid:` lines carry the user
+    /// id in field 9.
     func scanKeys() async throws -> [GPGKeyInfo] {
         let output = try await shell.run(
             "gpg",
-            arguments: ["--list-secret-keys", "--keyid-format", "long"]
+            arguments: [
+                "--list-secret-keys",
+                "--keyid-format=long",
+                "--with-colons",
+                "--with-fingerprint",
+            ]
         )
 
         guard !output.isEmpty else { return [] }
@@ -29,35 +42,35 @@ actor GPGKeyService {
         var keys: [GPGKeyInfo] = []
         var currentKeyID: String?
         var currentCreatedAt: Date?
+        var sawUID = false
 
-        let lines = output.components(separatedBy: .newlines)
+        for line in output.components(separatedBy: .newlines) {
+            // Keep empty fields — positions matter in colon records.
+            let fields = line.split(separator: ":", omittingEmptySubsequences: false)
+                .map(String.init)
+            guard fields.count >= 10 else { continue }
 
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            if trimmed.hasPrefix("sec") {
-                let parts = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-                for part in parts {
-                    if part.count >= 40, part.allSatisfy({ $0.isHexDigit }) {
-                        currentKeyID = part
-                    } else if part.count == 40, part.contains("/") == false {
-                        currentKeyID = part
-                    }
+            switch fields[0] {
+            case "sec":
+                currentKeyID = fields[4].isEmpty ? nil : fields[4]
+                currentCreatedAt = Self.date(fromEpoch: fields[5])
+                sawUID = false
+            case "fpr":
+                // First fpr after a sec is the primary key fingerprint; we
+                // don't surface it yet but keep the slot if needed later.
+                _ = fields[9]
+            case "uid":
+                if let keyID = currentKeyID, !sawUID, !fields[9].isEmpty {
+                    keys.append(GPGKeyInfo(
+                        id: UUID(),
+                        keyID: keyID,
+                        userID: fields[9],
+                        createdAt: currentCreatedAt
+                    ))
+                    sawUID = true
                 }
-                currentCreatedAt = parseDate(from: trimmed)
-            }
-
-            if trimmed.hasPrefix("uid"), let keyID = currentKeyID {
-                let uidPart = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
-                let userID = extractUserID(from: uidPart)
-                keys.append(GPGKeyInfo(
-                    id: UUID(),
-                    keyID: keyID,
-                    userID: userID,
-                    createdAt: currentCreatedAt
-                ))
-                currentKeyID = nil
-                currentCreatedAt = nil
+            default:
+                break
             }
         }
 
@@ -71,22 +84,10 @@ actor GPGKeyService {
         return !result.isEmpty
     }
 
-    private func parseDate(from line: String) -> Date? {
-        let parts = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        for part in parts {
-            if part.count == 10, part.contains("-") {
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd"
-                return formatter.date(from: part)
-            }
-        }
-        return nil
-    }
+    // MARK: - Helpers
 
-    private func extractUserID(from raw: String) -> String {
-        let stripped = raw
-            .replacingOccurrences(of: "^\\[.+?\\]\\s*", with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespaces)
-        return stripped
+    private static func date(fromEpoch field: String) -> Date? {
+        guard let secs = TimeInterval(field), secs > 0 else { return nil }
+        return Date(timeIntervalSince1970: secs)
     }
 }

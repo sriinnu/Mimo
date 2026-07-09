@@ -15,11 +15,35 @@ actor CloneService {
     private let shell = ShellService()
 
     func detectProvider(from url: String) -> GitProvider {
-        if url.contains("github.com") { return .github }
-        if url.contains("dev.azure.com") || url.contains("ssh.dev.azure.com") { return .azureDevOps }
-        if url.contains("gitlab.com") { return .gitlab }
-        if url.contains("bitbucket.org") { return .bitbucket }
-        return .custom
+        // Match on the parsed HOST only — a naive `url.contains("github.com")`
+        // is spoofable: `https://evil.github.com.attacker.com/...` and
+        // `https://notgithub.com/github.com/...` would both misdetect as
+        // GitHub and trigger provider rewrites (url.insteadOf, SSH host block)
+        // for the wrong host.
+        let host = Self.host(of: url)?.lowercased() ?? ""
+        switch host {
+        case "github.com": return .github
+        case "dev.azure.com", "ssh.dev.azure.com": return .azureDevOps
+        case "gitlab.com": return .gitlab
+        case "bitbucket.org": return .bitbucket
+        default: return .custom
+        }
+    }
+
+    /// Pull the hostname out of an HTTPS or SCP-style SSH git URL.
+    /// `https://host/...` → parsed via URLComponents; `git@host:...` →
+    /// strip the user, take everything up to the first `:` or `/`.
+    nonisolated static func host(of url: String) -> String? {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.contains("://") {
+            return URL(string: trimmed)?.host
+        }
+        var s = trimmed
+        if let at = s.firstIndex(of: "@") { s = String(s[s.index(after: at)...]) }
+        let stop = s.firstIndex(where: { $0 == ":" || $0 == "/" }) ?? s.endIndex
+        let host = String(s[..<stop])
+        return host.isEmpty ? nil : host
     }
 
     func findProfile(for provider: GitProvider, profiles: [GitProfile]) -> GitProfile? {
@@ -34,28 +58,22 @@ actor CloneService {
             env["GIT_SSH_COMMAND"] = "ssh -i \(expandedPath) -o IdentitiesOnly=yes"
         }
 
-        let process = Process()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
+        // Drain pipes concurrently via ShellService.capture so a large clone
+        // (progress > ~64KB on stderr) can't deadlock us.
+        let (output, errorOutput, status) = try await ShellService.capture(
+            executable: "/usr/bin/env",
+            arguments: ["git", "clone", url, directory],
+            environment: env
+        )
 
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "clone", url, directory]
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-        process.environment = env
-
-        try process.run()
-        process.waitUntilExit()
-
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: outputData, encoding: .utf8) ?? ""
-        let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-
-        if process.terminationStatus == 0 {
+        if status == 0 {
+            // git clone prints progress to stderr; surface both for success.
             return CloneResult(success: true, output: output + errorOutput)
         } else {
-            return CloneResult(success: false, output: errorOutput.isEmpty ? output : errorOutput)
+            return CloneResult(
+                success: false,
+                output: errorOutput.isEmpty ? output : errorOutput
+            )
         }
     }
 }

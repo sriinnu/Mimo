@@ -55,7 +55,9 @@ actor SSHConfigService {
             host = provider.defaultHost
         } else {
             let suffix = String(profile.id.uuidString.prefix(4))
-            host = "\(provider.defaultHost)-\(profile.name.lowercased().replacingOccurrences(of: " ", with: "-"))-\(suffix)"
+            // Slug the profile name so a newline / `#` / space can't break out
+            // of the Host line and corrupt the rest of ~/.ssh/config.
+            host = "\(provider.defaultHost)-\(Self.hostSlug(for: profile.name))-\(suffix)"
         }
         let key = profile.sshKeyPath ?? ""
         return """
@@ -65,6 +67,20 @@ actor SSHConfigService {
             IdentityFile \(key)
             User git
         """
+    }
+
+    /// Reduce an arbitrary profile name to a hostname-safe slug: lowercase
+    /// alphanumerics + dashes, collapsed and trimmed. Falls back to "profile"
+    /// if the name is entirely unsafe. Visible to tests.
+    static func hostSlug(for name: String) -> String {
+        var slug = String(name.lowercased().unicodeScalars.compactMap { scalar -> Character? in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : "-"
+        })
+        while slug.contains("--") {
+            slug = slug.replacingOccurrences(of: "--", with: "-")
+        }
+        slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return slug.isEmpty ? "profile" : slug
     }
 
     private func readContent() throws -> String {
