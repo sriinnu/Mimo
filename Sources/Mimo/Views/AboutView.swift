@@ -54,6 +54,9 @@ struct AboutView: View {
                 themePicker
                     .padding(.top, 14)
 
+                autoSwitchToggle
+                    .padding(.top, 12)
+
                 MimoDivider()
                     .padding(.horizontal, 48)
                     .padding(.vertical, 16)
@@ -134,8 +137,7 @@ struct AboutView: View {
     }
 
     @ViewBuilder
-    private func themeChip(_ theme: MimoTheme) -> some View {
-        let isSelected = themeStore.theme == theme
+    private func themeChip(_ theme: MimoTheme) -> some View {        let isSelected = themeStore.theme == theme
 
         Button {
             themeStore.setTheme(theme)
@@ -157,5 +159,47 @@ struct AboutView: View {
     private var copyrightText: String {
         Bundle.main.infoDictionary?["NSHumanReadableCopyright"] as? String
             ?? "Created by Srinivas Pendela · © 2026"
+    }
+
+    // MARK: - Auto-switch toggle
+
+    /// Opt-in: flip to the expected identity the moment you enter a repo whose
+    /// mapped identity differs from the active one. Off by default — the
+    /// mismatch card's "Switch to …" button is the always-safe path.
+    @ViewBuilder
+    private var autoSwitchToggle: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(MimoPalette.surfaceSunken)
+                    .frame(width: 28, height: 28)
+                Image(systemName: Constants.SystemImage.switchProfile)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MimoPalette.marigold)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-switch on mismatch")
+                    .font(MimoFont.body(12, weight: .semibold))
+                    .foregroundStyle(MimoPalette.ink)
+                Text("Switch the moment you enter a repo expecting a different identity.")
+                    .font(MimoFont.caption(9))
+                    .foregroundStyle(MimoPalette.inkSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 4)
+
+            Toggle("", isOn: $appModel.autoSwitchOnMismatch)
+                .labelsHidden()
+                .tint(MimoPalette.marigold)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(MimoPalette.surfaceSunken.opacity(0.5))
+        )
+        .padding(.horizontal, 20)
     }
 }

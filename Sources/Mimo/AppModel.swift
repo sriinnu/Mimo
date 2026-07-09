@@ -43,6 +43,21 @@ final class AppModel: ObservableObject {
     /// instead of Mimo silently overwriting their config later.
     @Published var pendingFirstRunSnapshot: GitIdentitySnapshot?
 
+    /// When on, Mimo switches to the expected profile the moment it detects a
+    /// foreground repo whose mapped identity differs from the active one — no
+    /// tap required. Default off: the mismatch card's "Switch to …" button is
+    /// the safe default; auto-switch is opt-in for people who want the guard.
+    @Published var autoSwitchOnMismatch: Bool = UserDefaults.standard.bool(
+        forKey: Constants.Persistence.autoSwitchKey
+    ) {
+        didSet {
+            guard oldValue != autoSwitchOnMismatch else { return }
+            UserDefaults.standard.set(autoSwitchOnMismatch, forKey: Constants.Persistence.autoSwitchKey)
+            // Clear the dedup guard on disable so re-enabling fires again.
+            if !autoSwitchOnMismatch { lastAutoSwitchedExpected = nil }
+        }
+    }
+
     private let firstRunSeenKey = "com.sriinnu.mimo.firstRunSeen"
 
     // MARK: - Services
@@ -55,6 +70,12 @@ final class AppModel: ObservableObject {
     // MARK: - Task Management
 
     private var loadTask: Task<Void, Never>?
+    private var cancellables = Set<AnyCancellable>()
+
+    /// Dedup guard for auto-switch — the expected-profile id we last
+    /// auto-switched to. Stops us re-triggering while a mismatch persists and
+    /// lets a later, different mismatch fire again.
+    private var lastAutoSwitchedExpected: UUID?
 
     deinit {
         loadTask?.cancel()
@@ -63,6 +84,10 @@ final class AppModel: ObservableObject {
     // MARK: - Initialization
 
     func loadOnLaunch() {
+        // Subscribe to mismatch state once so auto-switch can fire whenever a
+        // fresh mismatch appears and the setting is on.
+        setupMismatchAutoSwitch()
+
         loadTask = Task { [weak self] in
             guard let self else { return }
             isLoading = true
@@ -149,6 +174,38 @@ final class AppModel: ObservableObject {
             from: availableProfiles
         )
         syncActiveFlags()
+    }
+
+    // MARK: - Mismatch resolution
+
+    /// The profile the foreground repo expects, or nil if none mapped.
+    func resolveExpectedProfile() -> GitProfile? {
+        guard let id = foregroundRepoState.expectedProfileID else { return nil }
+        return availableProfiles.first { $0.id == id }
+    }
+
+    /// Switch to whatever the foreground repo expects. No-op if nothing's
+    /// mapped. Used by the opt-in auto-switch path.
+    func switchToExpectedProfile() async {
+        guard let expected = resolveExpectedProfile() else { return }
+        await switchProfile(to: expected)
+    }
+
+    /// Watches foreground repo state. When a fresh mismatch appears and
+    /// auto-switch is on, flips to the expected profile exactly once per
+    /// expected id — no thrashing on every poll.
+    private func setupMismatchAutoSwitch() {
+        $foregroundRepoState
+            .filter { $0.hasMismatch }
+            .compactMap { $0.expectedProfileID }
+            .removeDuplicates()
+            .sink { [weak self] expectedID in
+                guard let self else { return }
+                guard self.autoSwitchOnMismatch, expectedID != self.lastAutoSwitchedExpected else { return }
+                self.lastAutoSwitchedExpected = expectedID
+                Task { await self.switchToExpectedProfile() }
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Management Window
