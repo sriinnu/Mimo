@@ -101,7 +101,7 @@ struct SSHFormView: View {
 
             mimoField(label: Constants.Strings.email, text: $formViewModel.email, placeholder: Constants.Placeholder.email)
             mimoField(label: Constants.Strings.file, text: $formViewModel.filename, placeholder: Constants.Placeholder.filename)
-            mimoField(label: Constants.Strings.passphrase, text: $formViewModel.passphrase, placeholder: Constants.Placeholder.passphrase)
+            mimoSecureField(label: Constants.Strings.passphrase, text: $formViewModel.passphrase, placeholder: Constants.Placeholder.passphrase)
 
             HStack {
                 Spacer()
@@ -205,6 +205,21 @@ struct SSHFormView: View {
                 .font(MimoFont.caption(10))
                 .foregroundStyle(MimoPalette.inkTertiary)
             TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(MimoFont.body(12))
+        }
+    }
+
+    /// Masked variant for secrets — passphrase. Same shape as `mimoField` but
+    /// renders a SecureField so the value isn't shown in cleartext or exposed
+    /// to screen capture while typing.
+    @ViewBuilder
+    private func mimoSecureField(label: String, text: Binding<String>, placeholder: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(MimoFont.caption(10))
+                .foregroundStyle(MimoPalette.inkTertiary)
+            SecureField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
                 .font(MimoFont.body(12))
         }
