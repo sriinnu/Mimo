@@ -33,10 +33,7 @@ extension IdentityAuditLog {
             try await revertSSHConfig(entry)
 
         case .mimoProfiles:
-            throw RevertError.notSupported(
-                "Profile-file snapshots can't be reverted entry-by-entry. "
-                + "Switch profiles manually to restore a previous state."
-            )
+            try await revertMimoProfiles(entry)
 
         case .firstRunImport:
             throw RevertError.notSupported(
@@ -162,6 +159,47 @@ extension IdentityAuditLog {
             [.posixPermissions: 0o600],
             ofItemAtPath: sshConfigURL.path
         )
+    }
+
+    // MARK: - Mimo profile-file revert
+
+    /// `.mimoProfiles` entries snapshot a whole file — either a per-profile
+    /// gitconfig (`~/.config/mimo/profiles/<uuid>.gitconfig`) or `~/.gitconfig`
+    /// itself (for includeIf edits). Both are plain files, so the revert is
+    /// the same shape: if the live file still matches `after`, restore `before`
+    /// (or delete it if `before` is nil = the file didn't exist yet). If it
+    /// drifted, refuse rather than clobber — same guard as SSH config.
+    private func revertMimoProfiles(_ entry: AuditEntry) async throws {
+        guard let path = entry.path, !path.isEmpty else {
+            throw RevertError.missingSnapshot
+        }
+        let url = URL(fileURLWithPath: path)
+        let fm = FileManager.default
+
+        let live = fm.fileExists(atPath: path)
+            ? (try? String(contentsOfFile: path, encoding: .utf8))
+            : nil
+
+        if live != entry.after {
+            throw RevertError.conflict(
+                "\(url.lastPathComponent) has changed since this entry was written. "
+                + "Restoring the snapshot would overwrite those edits."
+            )
+        }
+
+        if let before = entry.before {
+            // File existed before this write — restore the prior contents.
+            try fm.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try before.write(to: url, atomically: true, encoding: .utf8)
+        } else {
+            // `before` was nil → this entry *created* the file; revert = remove it.
+            if fm.fileExists(atPath: path) {
+                try fm.removeItem(atPath: path)
+            }
+        }
     }
 }
 
