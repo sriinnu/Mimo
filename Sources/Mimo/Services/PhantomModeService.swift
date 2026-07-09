@@ -19,11 +19,11 @@
 //    - Branch switch doesn't change HEAD identity-of-tip, but it *does* change
 //      the SHA the working tree points at — so a `git switch other-branch`
 //      could trigger an early revert. Documented; not common in this flow.
-//    - If Mimo quits mid-phantom, phantom state is forgotten on launch
-//      (cleared defensively in AppDelegate). The git identity remains as the
-//      phantom profile until the user switches manually — by design, this
-//      is the safer failure mode than auto-reverting on relaunch (which
-//      could surprise a user who's still inside the same session).
+//    - Survives quits: an in-flight session is persisted to
+//      ~/.config/mimo/phantom.json. On relaunch we resume the HEAD-watch —
+//      and if HEAD already moved (commit landed) or the timeout elapsed
+//      while we were down, we auto-revert then. So a force-quit mid-phantom
+//      no longer leaves the identity stranded on the phantom profile.
 //
 
 import Foundation
@@ -61,6 +61,51 @@ final class PhantomModeService: ObservableObject {
 
     /// True while a phantom session is in flight.
     var isActive: Bool { pollTask != nil }
+
+    // MARK: Persistence (survives quits)
+
+    /// What we serialize to disk so a phantom session can resume after a quit.
+    private struct PersistedPhantomState: Codable {
+        let returnToID: UUID
+        let startedAt: Date
+        let capturedRepoRoot: URL?
+        let capturedHeadSHA: String?
+    }
+
+    private var phantomStateURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/mimo/phantom.json")
+    }
+
+    /// Snapshot the in-flight session to disk (mode 0600). Called once `start`
+    /// has captured state + flipped the identity.
+    private func persistState() {
+        guard let returnID = appModel?.phantomReturnToID,
+              let started = startDate else { return }
+        let state = PersistedPhantomState(
+            returnToID: returnID,
+            startedAt: started,
+            capturedRepoRoot: capturedRepoRoot,
+            capturedHeadSHA: capturedHeadSHA
+        )
+        do {
+            let dir = phantomStateURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(state)
+            try data.write(to: phantomStateURL, options: [.atomic])
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: phantomStateURL.path
+            )
+        } catch {
+            print("[PhantomMode] failed to persist state: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearPersistedState() {
+        try? FileManager.default.removeItem(at: phantomStateURL)
+    }
 
     // MARK: Public API
 
@@ -111,6 +156,10 @@ final class PhantomModeService: ObservableObject {
             )
         )
 
+        // Persist so a force-quit mid-phantom can resume (or auto-revert) on
+        // the next launch instead of stranding the identity.
+        persistState()
+
         pollTask = Task { [weak self, weak appModel] in
             guard let self else { return }
             await self.runLoop(appModel: appModel)
@@ -122,6 +171,7 @@ final class PhantomModeService: ObservableObject {
     func cancel(appModel: AppModel) {
         pollTask?.cancel()
         pollTask = nil
+        clearPersistedState()
 
         let returnID = appModel.phantomReturnToID
         let activeName = appModel.activeProfile?.name ?? "unknown"
@@ -156,11 +206,63 @@ final class PhantomModeService: ObservableObject {
     func clearOnLaunch(appModel: AppModel) {
         pollTask?.cancel()
         pollTask = nil
+        clearPersistedState()
         appModel.phantomReturnToID = nil
         appModel.phantomStartedAt = nil
         capturedRepoRoot = nil
         capturedHeadSHA = nil
         startDate = nil
+    }
+
+    /// Resume (or finish) a phantom session that was in flight when Mimo quit.
+    /// If we were past the timeout or the captured repo's HEAD already moved
+    /// while we were down, auto-revert now. Otherwise restart the HEAD-watch.
+    /// Called from AppDelegate on launch instead of the old clear-on-launch.
+    func resumeOnLaunch(appModel: AppModel) async {
+        guard FileManager.default.fileExists(atPath: phantomStateURL.path),
+              let data = try? Data(contentsOf: phantomStateURL)
+        else {
+            clearPersistedState()
+            return
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let state = try? decoder.decode(PersistedPhantomState.self, from: data) else {
+            // Nothing persisted (or corrupt) — nothing to resume.
+            clearPersistedState()
+            return
+        }
+
+        self.appModel = appModel
+        self.startDate = state.startedAt
+        self.capturedRepoRoot = state.capturedRepoRoot
+        self.capturedHeadSHA = state.capturedHeadSHA
+        appModel.phantomReturnToID = state.returnToID
+        appModel.phantomStartedAt = state.startedAt
+
+        let timeout = (state.capturedRepoRoot != nil) ? inRepoTimeout : noRepoTimeout
+
+        // Past the timeout window while down → revert now.
+        if Date().timeIntervalSince(state.startedAt) >= timeout {
+            print("[PhantomMode] resumed past timeout — auto-reverting.")
+            revert(appModel: appModel)
+            return
+        }
+        // A repo was captured — if HEAD already moved, the commit landed → revert.
+        if let repoRoot = state.capturedRepoRoot {
+            let current = await Self.headSHA(in: repoRoot)
+            if current != state.capturedHeadSHA {
+                print("[PhantomMode] resumed after a commit — auto-reverting.")
+                revert(appModel: appModel)
+                return
+            }
+        }
+
+        // Still in-flight — pick the watch back up.
+        pollTask = Task { [weak self, weak appModel] in
+            guard let self else { return }
+            await self.runLoop(appModel: appModel)
+        }
     }
 
     // MARK: Loop
@@ -199,6 +301,7 @@ final class PhantomModeService: ObservableObject {
         let returnID = appModel.phantomReturnToID
         let activeName = appModel.activeProfile?.name ?? "unknown"
         pollTask = nil
+        clearPersistedState()
         capturedRepoRoot = nil
         capturedHeadSHA = nil
         startDate = nil

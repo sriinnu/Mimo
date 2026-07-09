@@ -46,9 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observeActiveProfile()
         repoStateService.start(observing: appModel)
 
-        // Phantom mode never persists across app restarts. Defensive clear
-        // in case a previous run was force-killed mid-session.
-        PhantomModeService.shared.clearOnLaunch(appModel: appModel)
+        // Resume a phantom session that was in flight when Mimo last quit —
+        // or auto-revert it if the commit landed / timeout elapsed while down.
+        Task { await PhantomModeService.shared.resumeOnLaunch(appModel: appModel) }
 
         #if canImport(Sparkle)
         updaterController = SPUStandardUpdaterController(
