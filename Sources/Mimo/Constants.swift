@@ -227,6 +227,7 @@ enum Constants {
     enum Persistence {
         static let profilesKey = "com.sriinnu.mimo.profiles"
         static let directoriesKey = "com.sriinnu.mimo.directories"
+        static let autoSwitchKey = "com.sriinnu.mimo.autoSwitchOnMismatch"
     }
 
     // MARK: - Management Tab
