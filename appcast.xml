@@ -5,5 +5,17 @@
         <link>https://raw.githubusercontent.com/sriinnu/Mimo/main/appcast.xml</link>
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
+        <item>
+            <title>Mimo 1.0.3</title>
+            <pubDate>Fri, 10 Jul 2026 09:33:43 +0200</pubDate>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://github.com/sriinnu/Mimo/releases/download/v1.0.3/Mimo-v1.0.3.dmg"
+                sparkle:edSignature="Om6Ovk1Y3gv+xaA+1/4/yX2PD+Pg5L6pkcQCOSjuPv2/BbnayvQ5BDckYbRmH/Uo96cbl1itDdA7/7/9EmZzAw=="
+                sparkle:version="4"
+                sparkle:shortVersionString="1.0.3"
+                length="4205646"
+                type="application/octet-stream" />
+        </item>
     </channel>
 </rss>
